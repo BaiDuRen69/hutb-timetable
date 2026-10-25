@@ -52,9 +52,14 @@ fun coursePaletteIndex(courseName: String): Int {
     return (hash and Int.MAX_VALUE) % 8
 }
 
+/** 取课程配色（显式指定深浅色，供 Canvas 绘制使用）。 */
+fun coursePalette(courseName: String, dark: Boolean): CoursePalette {
+    val palettes = if (dark) DarkPalettes else LightPalettes
+    return palettes[coursePaletteIndex(courseName)]
+}
+
 /** 取课程配色（跟随应用主题的深浅色，而不是系统设置）。 */
 @Composable
 fun coursePalette(courseName: String): CoursePalette {
-    val palettes = if (LocalIsDarkTheme.current) DarkPalettes else LightPalettes
-    return palettes[coursePaletteIndex(courseName)]
+    return coursePalette(courseName, LocalIsDarkTheme.current)
 }
