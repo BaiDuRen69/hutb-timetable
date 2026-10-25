@@ -1,0 +1,10 @@
+// 项目级构建脚本：只声明 Android Gradle 插件与 Kotlin 相关插件版本
+plugins {
+    id 'com.android.application' version '9.2.1' apply false
+    // AGP 9.x 已内置 Kotlin 支持，无需再 apply 'org.jetbrains.kotlin.android'
+    //（强行 apply 会报 "plugin is no longer required for Kotlin support"）。
+    // 这里只声明 Compose 编译器插件。
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.2.20' apply false
+    // core 为纯 JVM 模块，需要显式声明 Kotlin JVM 插件
+    id 'org.jetbrains.kotlin.jvm' version '2.2.20' apply false
+}

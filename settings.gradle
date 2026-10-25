@@ -1,0 +1,19 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "HutbTimetable"
+include ':app'
+// core：纯 JVM 模块，承载领域模型与课表解析逻辑。
+// 单元测试经 JavaExec + JUnitCore 运行（中文路径下标准 Test worker 不可用），见 core/build.gradle。
+include ':core'

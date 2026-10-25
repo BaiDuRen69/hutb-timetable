@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+*/build/
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+
+# 本机配置
+local.properties
+
+# 构建产物（APK 由脚本复制到根目录分发，不入库）
+*.apk
+*.aab
+
+# WorkBuddy 助手工作目录
+.workbuddy/
+
+# 签名与密钥（若引入正式签名）
+keystore.properties
+*.keystore
+*.jks

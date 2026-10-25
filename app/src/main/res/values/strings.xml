@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">湖工商课表</string>
+
+    <!-- 登录 -->
+    <string name="login_title">湖南工商大学课表</string>
+    <string name="login_subtitle">登录教务系统后查询教室课表</string>
+    <string name="login_hint_edu">统一身份认证（学号 / 密码）</string>
+    <string name="login_success">登录成功，正在返回…</string>
+    <string name="login_start">登录教务系统</string>
+    <string name="login_tip_captcha">教务系统含滑块与图形验证码，请在本页完成验证后自动登录</string>
+    <string name="login_failed">登录失败，请重试</string>
+    <string name="login_cancel">已取消登录</string>
+
+    <!-- 课表 -->
+    <string name="timetable_title">课表</string>
+    <string name="refresh">刷新</string>
+    <string name="logout">退出登录</string>
+    <string name="no_course">该时段没有课程</string>
+    <string name="offline_hint">当前显示的是本地缓存数据</string>
+    <string name="week_prev">上一周</string>
+    <string name="week_next">下一周</string>
+    <string name="semester_switch">切换学期</string>
+    <string name="week_switch">切换周次</string>
+</resources>

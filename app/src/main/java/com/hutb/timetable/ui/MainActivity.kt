@@ -1,0 +1,253 @@
+package com.hutb.timetable.ui
+
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hutb.timetable.HutbApp
+import com.hutb.timetable.data.model.AuthSession
+import com.hutb.timetable.data.remote.PageSnapshot
+import com.hutb.timetable.ui.login.LoginScreen
+import com.hutb.timetable.ui.login.WebLoginActivity
+import com.hutb.timetable.ui.settings.SettingsScreen
+import com.hutb.timetable.ui.timetable.RoomPickerDialog
+import com.hutb.timetable.ui.timetable.SnapshotDialog
+import com.hutb.timetable.ui.timetable.TimetableScreen
+import com.hutb.timetable.ui.timetable.TimetableViewModel
+import com.hutb.timetable.ui.theme.HutbTimetableTheme
+import kotlinx.coroutines.delay
+
+/**
+ * 主界面宿主。
+ *
+ * 负责：
+ * - 未登录时显示登录页；
+ * - 登录后展示课表；
+ * - 承接 WebView 登录结果并写入会话。
+ */
+class MainActivity : ComponentActivity() {
+
+    private var viewModel: TimetableViewModel? = null
+
+    private val loginLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val data = result.data
+        if (result.resultCode != RESULT_OK || data == null) return@registerForActivityResult
+
+        val jsessionId = data.getStringExtra(WebLoginActivity.RESULT_JSESSION_ID).orEmpty()
+        if (jsessionId.isBlank()) {
+            Toast.makeText(this, "未获取到登录会话，请重试", Toast.LENGTH_SHORT).show()
+            return@registerForActivityResult
+        }
+        val serverId = data.getStringExtra(WebLoginActivity.RESULT_SERVER_ID).orEmpty()
+        val studentId = data.getStringExtra(WebLoginActivity.RESULT_STUDENT_ID).orEmpty()
+        val displayName = data.getStringExtra(WebLoginActivity.RESULT_DISPLAY_NAME).orEmpty()
+
+        viewModel?.onLoginSuccess(
+            AuthSession(
+                jsessionId = jsessionId,
+                serverId = serverId,
+                displayName = displayName
+            ),
+            studentId,
+            displayName
+        )
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // targetSdk 36：Android 15+ 强制 edge-to-edge，旧的状态栏着色属性已失效
+        enableEdgeToEdge()
+
+        val container = (application as HutbApp).container
+
+        setContent {
+            HutbTimetableTheme {
+                val vm: TimetableViewModel = viewModel(
+                    factory = TimetableViewModel.factory(container.repository, container.settings)
+                )
+                viewModel = vm
+
+                val state by vm.uiState.collectAsStateWithLifecycle()
+
+                // 显式的"是否展示登录页"状态：初值取决于本地是否已有会话，
+                // 之后只由用户操作（登录成功 / 主动退出）改变，避免重组时来回跳。
+                // rememberSaveable：屏幕旋转后覆盖层不凭空消失。
+                var showLogin by rememberSaveable { mutableStateOf(!container.repository.hasStoredSession()) }
+
+                // 设置页开关
+                var showSettings by rememberSaveable { mutableStateOf(false) }
+
+                // 教室选择对话框的开关
+                var showRoomPicker by rememberSaveable { mutableStateOf(false) }
+
+                // 页面快照对话框（排查教务系统改版用）
+                var showSnapshots by rememberSaveable { mutableStateOf(false) }
+                var snapshots by remember { mutableStateOf(emptyList<java.io.File>()) }
+
+                // 主界面"再按一次退出"：避免在根界面误触直接退出
+                var exitArmed by remember { mutableStateOf(false) }
+                LaunchedEffect(exitArmed) {
+                    if (exitArmed) {
+                        delay(2000)
+                        exitArmed = false
+                    }
+                }
+
+                val hasOverlay = showLogin || showSettings || showRoomPicker || showSnapshots
+
+                // 返回键分层：先关闭最上层覆盖层，主界面才是"再按一次退出"。
+                // 之前覆盖层没有统一拦截，返回键会直接把 Activity 结束掉。
+                BackHandler(enabled = hasOverlay) {
+                    when {
+                        showLogin -> showLogin = false
+                        showSettings -> showSettings = false
+                        showRoomPicker -> showRoomPicker = false
+                        showSnapshots -> showSnapshots = false
+                    }
+                }
+                BackHandler(enabled = !hasOverlay) {
+                    if (exitArmed) {
+                        finish()
+                    } else {
+                        exitArmed = true
+                        Toast.makeText(this@MainActivity, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
+                LaunchedEffect(state.session.loggedIn) {
+                    if (state.session.loggedIn) showLogin = false
+                }
+
+                // 主界面常驻组合；登录页 / 设置页以覆盖层叠在其上，
+                // 返回时主界面不重组（整栋楼矩阵重组一次要几百毫秒，替换式显示每次返回都重建）
+                Box(modifier = Modifier.fillMaxSize()) {
+                    TimetableScreen(
+                        state = state,
+                        onRefresh = { vm.loadSchedule(fresh = true) },
+                        onPrevWeek = { vm.switchWeek(state.schedule.currentWeek - 1) },
+                        onNextWeek = { vm.switchWeek(state.schedule.currentWeek + 1) },
+                        onSelectWeek = { vm.switchWeek(it) },
+                        onSelectSemester = { vm.switchSemester(it) },
+                        onLogin = {
+                            loginLauncher.launch(
+                                WebLoginActivity.intent(this@MainActivity, container.credentials.studentId)
+                            )
+                        },
+                        // 已登录时点右上角账号按钮只是打开登录页（可返回），不直接登出
+                        onLogout = { showLogin = true },
+                        onSwitchQueryMode = { vm.switchQueryMode(it) },
+                        onPickRoom = {
+                            // 只准备草稿；对话框内的浏览不影响当前查询条件
+                            vm.beginRoomDraft()
+                            showRoomPicker = true
+                        },
+                        onFilterChange = { vm.updateFilter(it) },
+                        onSelectRoom = { vm.selectRoom(it) },
+                        onToggleShortRoomNames = { vm.toggleShortRoomNames() },
+                        onSelectRoomSortMode = { vm.setRoomSortMode(it) },
+                        onOpenSettings = { showSettings = true },
+                        onShowSnapshots = {
+                            snapshots = PageSnapshot.list(this@MainActivity)
+                            showSnapshots = true
+                        }
+                    )
+
+                    // 教室选择对话框（草稿态：确定才提交，取消零请求）
+                    if (showRoomPicker) {
+                        RoomPickerDialog(
+                            campuses = state.room.campuses,
+                            buildings = state.room.draftBuildingOptions,
+                            classrooms = state.room.draftClassroomOptions,
+                            initialCampusId = state.room.selectedCampusId,
+                            initialBuildingId = state.room.selectedBuildingId,
+                            initialRoomCode = state.room.selectedRoomCode,
+                            buildingsLoading = state.room.draftBuildingsLoading,
+                            classroomsLoading = state.room.draftClassroomsLoading,
+                            onDismiss = { showRoomPicker = false },
+                            onPreviewCampus = { vm.previewCampus(it) },
+                            onPreviewBuilding = { campusId, buildingId, buildingName ->
+                                vm.previewBuilding(campusId, buildingId, buildingName)
+                            },
+                            onConfirm = { campusId, buildingId, buildingName, roomCode ->
+                                showRoomPicker = false
+                                vm.applyRoomSelection(campusId, buildingId, buildingName, roomCode)
+                            }
+                        )
+                    }
+
+                    // 页面快照对话框（排查教务系统改版用）
+                    if (showSnapshots) {
+                        SnapshotDialog(
+                            snapshots = snapshots,
+                            onDismiss = { showSnapshots = false },
+                            onRefreshSnapshots = { snapshots = PageSnapshot.list(this@MainActivity) }
+                        )
+                    }
+
+                    if (showSettings) {
+                        // 设置页自身不带背景色，覆盖层模式下包一层不透明背景
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                        ) {
+                            SettingsScreen(
+                                settings = container.settings,
+                                onBack = { showSettings = false },
+                                onChanged = { vm.reloadSettings() },
+                                secureStorage = container.credentials.secureStorage,
+                                onClearLocalData = {
+                                    vm.clearLocalData()
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        "已清除本地缓存",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            )
+                        }
+                    }
+
+                    if (showLogin) {
+                        LoginScreen(
+                            loading = false,
+                            errorMessage = state.session.errorMessage,
+                            // 登录页是覆盖层，任何情况下都可以返回课表（离线缓存仍可查看）
+                            canBack = true,
+                            loggedIn = state.session.loggedIn,
+                            onLogin = {
+                                loginLauncher.launch(
+                                    WebLoginActivity.intent(this@MainActivity, container.credentials.studentId)
+                                )
+                            },
+                            onBack = { showLogin = false },
+                            onLogout = {
+                                vm.logout()
+                                showLogin = true
+                            },
+                            secureStorage = container.credentials.secureStorage
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

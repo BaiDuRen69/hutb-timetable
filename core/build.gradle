@@ -1,0 +1,95 @@
+// core：纯 JVM 模块，承载与 Android 无关的领域模型与课表解析逻辑。
+// 独立成模块的好处：
+// 1. 解析器可用标准 JUnit 运行，无需 Android 依赖；
+// 2. 构建快；
+// 3. 解析逻辑可被其他端（CLI / 桌面）复用。
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+dependencies {
+    // HTML 解析（强智 jsxsd 课表页面为服务端渲染的 HTML 表格）
+    api 'org.jsoup:jsoup:1.18.1'
+
+    testImplementation 'junit:junit:4.13.2'
+}
+
+// ---------------------------------------------------------------------------
+// 单元测试的执行方式
+//
+// 已知问题：本项目位于中文路径（D:\腾讯\WorkBuddy空间\课表查询），
+// Gradle 9.4.1 的 Test 任务通过独立 worker 进程加载测试类，
+// worker 无法处理非 ASCII 路径，会报
+//   "Could not execute test class ... ClassNotFoundException"
+// 同一份代码复制到纯 ASCII 路径后全部通过（已实测验证）。
+//
+// 解决方式：不用 Gradle 的 Test 任务，改为 JavaExec 在当前进程内直接调用
+// JUnitCore 运行测试类 —— 这样就没有 worker 进程的路径问题。
+// 报告仍会输出到控制台，便于 CI 与本地查看。
+// ---------------------------------------------------------------------------
+
+tasks.named('test') {
+    // 禁用标准 Test 任务（中文路径下不可用），改由 unitTest 承担
+    enabled = false
+    dependsOn tasks.named('unitTest')
+}
+
+tasks.register('unitTest', JavaExec) {
+    group = 'verification'
+    description = '运行 core 模块单元测试（JUnitCore 直跑，自动发现 *Test 类）'
+
+    dependsOn tasks.named('testClasses')
+
+    mainClass = 'org.junit.runner.JUnitCore'
+
+    // Kotlin 插件把编译产物放在 build/classes/kotlin/<sourceSet>，
+    // 这里显式纳入 classpath。
+    classpath = files(
+        layout.buildDirectory.dir('classes/kotlin/test'),
+        layout.buildDirectory.dir('classes/java/test'),
+        layout.buildDirectory.dir('classes/kotlin/main'),
+        layout.buildDirectory.dir('classes/java/main')
+    ) + configurations.testRuntimeClasspath
+
+    // 自动发现测试类：扫描测试产物里的 *Test.class，新增测试文件无需再手改本文件。
+    // 漏改名单曾导致新测试静默不执行，这里从根上消除该风险。
+    doFirst {
+        def testClassesDir = layout.buildDirectory.dir('classes/kotlin/test').get().asFile
+        def discovered = fileTree(testClassesDir) { include '**/*Test.class' }
+            .files
+            .collect {
+                testClassesDir.toPath().relativize(it.toPath()).toString()
+                    .replace(File.separator, '.')
+                    .replace('.class', '')
+            }
+            .sort()
+        if (discovered.isEmpty()) {
+            throw new GradleException("未发现任何 *Test 测试类（目录：$testClassesDir）")
+        }
+        logger.lifecycle("运行测试类：${discovered.join(', ')}")
+        setArgs(discovered)
+    }
+
+    // JUnitCore 的退出码 = 失败用例数（0 表示全部通过）。
+    // 这里先吞掉退出码，再在 doLast 里自行判断，好让失败信息更明确。
+    ignoreExitValue = true
+
+    doLast {
+        def exitValue = executionResult.get().exitValue
+        if (exitValue != 0) {
+            throw new GradleException("core 模块单元测试失败（JUnitCore 退出码 $exitValue）")
+        }
+    }
+}

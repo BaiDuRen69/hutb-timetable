@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  教务系统 jwgl.hutb.edu.cn 与统一认证 cas.hutb.edu.cn 目前仅提供 HTTP 明文访问，
+  故仅对这两个主机放行明文流量（不含子域）；其余域名一律默认仅 HTTPS。
+  注意：JSESSIONID 会在明文链路上传输，属学校侧基础设施限制。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">jwgl.hutb.edu.cn</domain>
+        <domain includeSubdomains="false">cas.hutb.edu.cn</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
