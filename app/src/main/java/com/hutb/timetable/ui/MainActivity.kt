@@ -1,6 +1,7 @@
 package com.hutb.timetable.ui
 
 import android.os.Bundle
+import android.webkit.CookieManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -57,17 +58,14 @@ class MainActivity : ComponentActivity() {
             return@registerForActivityResult
         }
         val serverId = data.getStringExtra(WebLoginActivity.RESULT_SERVER_ID).orEmpty()
-        val studentId = data.getStringExtra(WebLoginActivity.RESULT_STUDENT_ID).orEmpty()
-        val displayName = data.getStringExtra(WebLoginActivity.RESULT_DISPLAY_NAME).orEmpty()
 
+        // 学业身份不由登录页回传（它可能只是上一个账号的旧值），
+        // 由 ViewModel 在新会话上重新向后端解析，缓存分区才可靠
         viewModel?.onLoginSuccess(
             AuthSession(
                 jsessionId = jsessionId,
-                serverId = serverId,
-                displayName = displayName
-            ),
-            studentId,
-            displayName
+                serverId = serverId
+            )
         )
     }
 
@@ -147,9 +145,7 @@ class MainActivity : ComponentActivity() {
                         onSelectWeek = { vm.switchWeek(it) },
                         onSelectSemester = { vm.switchSemester(it) },
                         onLogin = {
-                            loginLauncher.launch(
-                                WebLoginActivity.intent(this@MainActivity, container.credentials.studentId)
-                            )
+                            loginLauncher.launch(WebLoginActivity.intent(this@MainActivity))
                         },
                         // 已登录时点右上角账号按钮只是打开登录页（可返回），不直接登出
                         onLogout = { showLogin = true },
@@ -181,6 +177,8 @@ class MainActivity : ComponentActivity() {
                             initialRoomCode = state.room.selectedRoomCode,
                             buildingsLoading = state.room.draftBuildingsLoading,
                             classroomsLoading = state.room.draftClassroomsLoading,
+                            errorMessage = state.room.errorMessage,
+                            onRetry = { vm.loadRoomOptions() },
                             onDismiss = { showRoomPicker = false },
                             onPreviewCampus = { vm.previewCampus(it) },
                             onPreviewBuilding = { campusId, buildingId, buildingName ->
@@ -211,6 +209,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             SettingsScreen(
                                 settings = container.settings,
+                                semesterId = state.schedule.currentSemesterId,
                                 onBack = { showSettings = false },
                                 onChanged = { vm.reloadSettings() },
                                 secureStorage = container.credentials.secureStorage,
@@ -234,12 +233,14 @@ class MainActivity : ComponentActivity() {
                             canBack = true,
                             loggedIn = state.session.loggedIn,
                             onLogin = {
-                                loginLauncher.launch(
-                                    WebLoginActivity.intent(this@MainActivity, container.credentials.studentId)
-                                )
+                                loginLauncher.launch(WebLoginActivity.intent(this@MainActivity))
                             },
                             onBack = { showLogin = false },
                             onLogout = {
+                                // 登出同时清掉 WebView 的 CAS 会话：
+                                // 否则下次"切换账号"会被 SSO 直接送回原账号
+                                CookieManager.getInstance().removeAllCookies(null)
+                                CookieManager.getInstance().flush()
                                 vm.logout()
                                 showLogin = true
                             },

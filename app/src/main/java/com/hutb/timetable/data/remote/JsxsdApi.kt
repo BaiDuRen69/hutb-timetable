@@ -324,7 +324,9 @@ class JsxsdApi(
     private fun snapshot(tag: String, url: String, html: String) {
         if (!BuildConfig.DEBUG) return
         val context = appContext ?: return
-        PageSnapshot.save(context, tag, url, PageSnapshot.truncate(html))
+        // 传完整页面：PageSnapshot 自己按"头部 + 正文"预算裁剪，
+        // 提前截断会丢掉表格后半部分，改版排查时看不到真实结构
+        PageSnapshot.save(context, tag, url, html)
     }
 
     /**
@@ -537,8 +539,12 @@ class JsxsdApi(
      * 取值形如 `0t`=湖南工商大学月亮岛校区、`00001`=南校区、`00002`=北校区。
      */
     suspend fun fetchCampuses(semesterId: String? = null): List<RoomOption> {
-        val html = fetchRoomPage(semesterId = semesterId) ?: return emptyList()
-        return JsxsdScheduleParser.parseCampuses(html)
+        val html = fetchRoomPage(semesterId = semesterId)
+        val campuses = JsxsdScheduleParser.parseCampuses(html)
+        if (campuses.isEmpty()) {
+            throw HutbError.Parse("未能从教室查询页解析出校区列表")
+        }
+        return campuses
     }
 
     /**
@@ -552,18 +558,20 @@ class JsxsdApi(
         semesterId: String? = null
     ): List<RoomOption> {
         val html = fetchRoomPage(semesterId = semesterId, campusId = campusId)
-        val fromPage = html?.let { JsxsdScheduleParser.parseBuildingOptions(it) }.orEmpty()
+        val fromPage = JsxsdScheduleParser.parseBuildingOptions(html)
         if (fromPage.isNotEmpty()) {
             Log.i(TAG, "教学楼来自页面 #jzwid，共 ${fromPage.size} 个")
             return fromPage
         }
 
         // 页面没渲染出来时，直接提交表单让服务端按校区填表
-        val fromPost = fetchRoomPage(
-            semesterId = semesterId,
-            campusId = campusId,
-            post = true
-        )?.let { JsxsdScheduleParser.parseBuildingOptions(it) }.orEmpty()
+        val fromPost = JsxsdScheduleParser.parseBuildingOptions(
+            fetchRoomPage(
+                semesterId = semesterId,
+                campusId = campusId,
+                post = true
+            )
+        )
         if (fromPost.isNotEmpty()) {
             Log.i(TAG, "教学楼来自 POST 后的 #jzwid，共 ${fromPost.size} 个")
             return fromPost
@@ -571,15 +579,19 @@ class JsxsdApi(
 
         val buildings = probeRoomAjax(
             paths = listOf(PATH_ROOM_AJAX),
+            // 不接受空参数候选：不带校区时服务端可能返回全校教学楼，
+            // 混进当前校区的下拉框里
             paramSets = listOf(
                 mapOf("xqid" to campusId),
                 mapOf("xqid" to campusId, "xnxqh" to semesterId.orEmpty()),
-                mapOf("xqid" to campusId, "xnxqh" to semesterId.orEmpty(), "zc1" to "1", "zc2" to "1"),
-                emptyMap()
+                mapOf("xqid" to campusId, "xnxqh" to semesterId.orEmpty(), "zc1" to "1", "zc2" to "1")
             ).filter { it.values.none { v -> v.isBlank() } }
         )
 
         Log.i(TAG, "教学楼来自 getJxlByAjax，共 ${buildings.size} 个")
+        if (buildings.isEmpty()) {
+            throw HutbError.Parse("未能获取该校区的教学楼列表")
+        }
         return buildings
     }
 
@@ -610,7 +622,7 @@ class JsxsdApi(
             week = week,
             campusId = campusId,
             buildingId = buildingId
-        ) ?: return emptyList()
+        ) ?: throw HutbError.Parse("未获取到教室课表页面")
 
         // 大页面解析放 Default 线程池
         val labels = withContext(Dispatchers.Default) {
@@ -622,6 +634,9 @@ class JsxsdApi(
             TAG,
             "教室由课表首列反推：原始 ${labels.size} 个，按教学楼[$buildingName]收窄后 ${scoped.size} 个"
         )
+        if (result.isEmpty()) {
+            throw HutbError.Parse("未能从课表页解析出教室列表")
+        }
         return result.map { RoomOption(code = it, name = it) }
     }
 
@@ -634,7 +649,7 @@ class JsxsdApi(
         semesterId: String? = null,
         campusId: String? = null,
         post: Boolean = false
-    ): String? {
+    ): String {
         return try {
             val query = buildList {
                 semesterId?.takeIf { it.isNotBlank() }?.let { add("xnxqh" to it) }
@@ -665,11 +680,12 @@ class JsxsdApi(
             }
             snapshot("rooms", url, text)
             text
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: HutbError) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "抓取教室课表页失败", e)
-            null
+            throw http.toHutbError(e)
         }
     }
 

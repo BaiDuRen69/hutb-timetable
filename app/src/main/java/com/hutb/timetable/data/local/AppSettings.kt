@@ -113,13 +113,38 @@ class AppSettings(context: Context) {
             ?: timetables.firstOrNull()
             ?: ClassTimetable.defaultTimetables().first()
 
-    /** 开学（第一周周一）日期，"yyyy-MM-dd"，空表示未设置。 */
-    var semesterStartDate: String
-        get() = prefs.getString(KEY_SEMESTER_START, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_SEMESTER_START, value).apply()
+    /**
+     * 指定学期的开学（第一周周一）日期，"yyyy-MM-dd"，空表示未设置。
+     *
+     * 按学期隔离：不同学期开学日期不同，用一个全局值会把上学期日期套到下学期。
+     */
+    fun semesterStartDateFor(semesterId: String): String =
+        if (semesterId.isBlank()) "" else prefs.getString(keyStart(semesterId), "") ?: ""
 
-    /** 由开学日期推算的当前周次；未设置或日期非法时返回 null。 */
-    fun currentWeekNumber(): Int? = computeCurrentWeek(semesterStartDate, LocalDate.now())
+    fun setSemesterStartDateFor(semesterId: String, value: String) {
+        if (semesterId.isBlank()) return
+        prefs.edit().putString(keyStart(semesterId), value).apply()
+    }
+
+    /**
+     * 旧版本只存了一个全局开学日期；升级后归到当前学期并删除旧键，
+     * 避免它继续被当作"任何学期都适用"的日期。
+     */
+    fun migrateLegacyStartDate(semesterId: String) {
+        if (semesterId.isBlank()) return
+        val legacy = prefs.getString(KEY_SEMESTER_START, "").orEmpty()
+        if (legacy.isBlank()) return
+        if (semesterStartDateFor(semesterId).isBlank()) {
+            setSemesterStartDateFor(semesterId, legacy)
+        }
+        prefs.edit().remove(KEY_SEMESTER_START).apply()
+    }
+
+    /** 由指定学期的开学日期推算当前周次；未设置或日期非法时返回 null。 */
+    fun currentWeekNumber(semesterId: String): Int? =
+        computeCurrentWeek(semesterStartDateFor(semesterId), LocalDate.now())
+
+    private fun keyStart(semesterId: String): String = "$KEY_SEMESTER_START_PREFIX$semesterId"
 
     fun newTimetableId(): String =
         "custom_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS"))
@@ -165,6 +190,9 @@ class AppSettings(context: Context) {
     companion object {
         private const val KEY_TIMETABLES = "class_timetables"
         private const val KEY_ACTIVE_TIMETABLE = "active_timetable_id"
+
+        /** 旧版本遗留的全局开学日期，仅用于迁移。 */
         private const val KEY_SEMESTER_START = "semester_start_date"
+        private const val KEY_SEMESTER_START_PREFIX = "semester_start_"
     }
 }

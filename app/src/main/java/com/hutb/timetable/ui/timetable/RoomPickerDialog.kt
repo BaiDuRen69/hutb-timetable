@@ -31,6 +31,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +66,8 @@ fun RoomPickerDialog(
     initialRoomCode: String?,
     buildingsLoading: Boolean,
     classroomsLoading: Boolean,
+    errorMessage: String? = null,
+    onRetry: () -> Unit = {},
     onDismiss: () -> Unit,
     onPreviewCampus: (String) -> Unit,
     onPreviewBuilding: (campusId: String, buildingId: String, buildingName: String?) -> Unit,
@@ -99,6 +102,23 @@ fun RoomPickerDialog(
                 text = "选择校区 / 教学楼 / 教室",
                 style = MaterialTheme.typography.titleMedium
             )
+            if (!errorMessage.isNullOrBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onRetry) {
+                        Text("重试", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             Spacer(Modifier.height(12.dp))
 
             SectionLabel("校区")

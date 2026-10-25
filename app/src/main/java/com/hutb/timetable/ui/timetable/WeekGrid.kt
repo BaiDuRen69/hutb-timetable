@@ -91,14 +91,18 @@ fun WeekGrid(
         PERIOD_SLOTS.filter { it.start <= filter.endPeriod && it.end >= filter.startPeriod }
     }
 
-    val courseMap = remember(courses, filter) {
-        val slots = PERIOD_SLOTS.filter { it.start <= filter.endPeriod && it.end >= filter.startPeriod }
-        val map = mutableMapOf<Pair<Int, Int>, MutableList<Course>>()
+    val courseMap = remember(courses, filter, visibleSlots) {
+        val map = mutableMapOf<Pair<Int, Int>, MutableList<SlotCourse>>()
         for (course in filter.apply(courses)) {
-            val slot = slots.firstOrNull { it.start <= course.startPeriod && course.startPeriod <= it.end }
-                ?: slots.firstOrNull { it.start <= course.endPeriod && course.startPeriod <= it.end }
-                ?: continue
-            map.getOrPut(course.weekday to slot.start) { mutableListOf() }.add(course)
+            // 一门课可能横跨多个节次对（如 1-4 节）：每个覆盖到的格子都要摆，
+            // 后续格子标记为"续"，避免第二格空白让人以为课只上一半
+            val matched = visibleSlots.filter {
+                it.end >= course.startPeriod && it.start <= course.endPeriod
+            }
+            matched.forEachIndexed { index, slot ->
+                map.getOrPut(course.weekday to slot.start) { mutableListOf() }
+                    .add(SlotCourse(course, continued = index > 0))
+            }
         }
         map
     }
@@ -128,7 +132,7 @@ fun WeekGrid(
     val headerHeight = (44 * minOf(fontScale, 1.4f)).dp
     val periodHeight = (64 * fontScale).dp
     val dayColumnWidth = 116.dp
-    val periodColumnWidth = 70.dp
+    val periodColumnWidth = (70 * minOf(fontScale, 1.4f)).dp
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
     val density = LocalDensity.current
@@ -354,7 +358,7 @@ private fun PeriodCell(
 
 @Composable
 private fun DayCell(
-    courses: List<Course>,
+    courses: List<SlotCourse>,
     width: Dp,
     height: Dp,
     isToday: Boolean,
@@ -376,19 +380,26 @@ private fun DayCell(
             Box(modifier = Modifier.fillMaxSize())
         } else {
             Column(modifier = Modifier.fillMaxSize()) {
-                courses.forEach { course ->
+                courses.forEach { item ->
                     CourseCard(
-                        course = course,
-                        onClick = { onCourseClick(course) },
+                        course = item.course,
+                        onClick = { onCourseClick(item.course) },
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxWidth()
+                            .fillMaxWidth(),
+                        continued = item.continued
                     )
                 }
             }
         }
     }
 }
+
+/** 网格里的课程 + 它是该课程的第几段（第二段起显示"续"）。 */
+private data class SlotCourse(
+    val course: Course,
+    val continued: Boolean
+)
 
 /**
  * 只画右边和下边的网格线：相邻格的共享边不会叠成双线。
@@ -406,7 +417,9 @@ private fun Modifier.gridCellLines(outline: Color): Modifier = drawBehind {
 fun CourseCard(
     course: Course,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 连堂课的第二段起：显示"续"而不是重复一遍完整信息 */
+    continued: Boolean = false
 ) {
     val palette = coursePalette(course.courseName)
     Row(
@@ -429,7 +442,7 @@ fun CourseCard(
                 .padding(horizontal = 6.dp, vertical = 3.dp)
         ) {
             Text(
-                text = course.courseName,
+                text = if (continued) "续 · ${course.courseName}" else course.courseName,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = palette.text,

@@ -32,6 +32,9 @@ class ScheduleCache(context: Context) : SQLiteOpenHelper(
         /** 全局最多保留的缓存条数（约覆盖当前学期 + 历史若干周）。 */
         private const val MAX_CACHED_ROWS = 80
 
+        /** 缓存 payload 的总字节上限；整栋楼的教室课表 JSON 远比个人课表大。 */
+        private const val MAX_CACHED_BYTES = 4L * 1024 * 1024
+
         private const val TABLE_SCHEDULE = "cached_schedule"
         private const val TABLE_SEMESTER = "cached_semester"
     }
@@ -148,6 +151,40 @@ class ScheduleCache(context: Context) : SQLiteOpenHelper(
                 "(SELECT rowid FROM $TABLE_SCHEDULE ORDER BY cached_at DESC LIMIT ?)",
             arrayOf(maxRows)
         )
+        pruneByBytes()
+    }
+
+    /**
+     * 再进行一次字节级裁剪：条数相同不代表体积相同，
+     * 教室全楼课表一周可能就有几百 KB。从最旧的开始删，至少保留最近一条。
+     */
+    private fun pruneByBytes(maxBytes: Long = MAX_CACHED_BYTES) {
+        val deleteIds = mutableListOf<Long>()
+        var kept = 0
+        var total = 0L
+        writableDatabase.query(
+            TABLE_SCHEDULE,
+            arrayOf("rowid", "LENGTH(payload)"),
+            null, null, null, null,
+            "cached_at DESC"
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val rowId = cursor.getLong(0)
+                val bytes = cursor.getLong(1)
+                if (kept > 0 && total + bytes > maxBytes) {
+                    deleteIds.add(rowId)
+                } else {
+                    kept++
+                    total += bytes
+                }
+            }
+        }
+        // rowid 是 SQLite 内部整数，直接拼进 IN 列表是安全的
+        deleteIds.chunked(200).forEach { chunk ->
+            writableDatabase.execSQL(
+                "DELETE FROM $TABLE_SCHEDULE WHERE rowid IN (${chunk.joinToString(",")})"
+            )
+        }
     }
 
     /** 读取指定学期/周次/分区的缓存。 */

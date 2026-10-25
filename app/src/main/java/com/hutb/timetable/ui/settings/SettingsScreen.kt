@@ -17,8 +17,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -53,13 +53,17 @@ import androidx.compose.ui.unit.dp
 import com.hutb.timetable.data.local.AppSettings
 import com.hutb.timetable.data.local.ClassTimetable
 import com.hutb.timetable.data.local.PeriodTime
+import com.hutb.timetable.core.computeCurrentWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
- * 设置页：开学时间（推算当前周次）+ 作息时间表（四套内置 + 自定义）。
+ * 设置页：开学时间（按学期推算当前周次）+ 作息时间表（四套内置 + 自定义）。
+ *
+ * 开学日期按 [semesterId] 分开存储：不同学期开学日期不同，
+ * 全局一个值会把上学期日期套到下学期。
  *
  * 所有修改即时落盘并通过 [onChanged] 通知调用方刷新课表。
  */
@@ -67,6 +71,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
+    semesterId: String,
     onBack: () -> Unit,
     onChanged: () -> Unit,
     /** 凭据是否加密落盘；false 时明确提示用户 */
@@ -81,13 +86,17 @@ fun SettingsScreen(
     // timetables 是复杂对象列表，初值来自持久化设置，保持 remember 即可
     var timetables by remember { mutableStateOf(settings.timetables) }
     var activeId by rememberSaveable { mutableStateOf(settings.activeTimetableId) }
-    var startDate by rememberSaveable { mutableStateOf(settings.semesterStartDate) }
+    var startDate by rememberSaveable(semesterId) {
+        mutableStateOf(settings.semesterStartDateFor(semesterId))
+    }
     var expandedId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     var showClearConfirm by rememberSaveable { mutableStateOf(false) }
 
     val active = timetables.firstOrNull { it.id == activeId }
-    val currentWeek = settings.currentWeekNumber()
+    val currentWeek = if (startDate.isBlank()) null else computeCurrentWeek(startDate, LocalDate.now())
+    // 没有选中学期时无处归属，先禁止编辑，避免把日期存到空键上
+    val canEditStartDate = semesterId.isNotBlank()
 
     Column(
         modifier = Modifier
@@ -103,7 +112,7 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
             }
             Text(
                 text = "设置",
@@ -122,23 +131,27 @@ fun SettingsScreen(
             )
         }
 
-        // ---- 开学时间 ----
-        SectionCard(title = "开学时间") {
+        // ---- 开学时间（按学期） ----
+        SectionCard(title = "开学时间（当前学期）") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { showDatePicker = true }
+                    .clickable(enabled = canEditStartDate) { showDatePicker = true }
                     .padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (startDate.isBlank()) "未设置（点击选择）"
-                        else "第一周周一：$startDate",
+                        text = when {
+                            !canEditStartDate -> "请先登录并选择学期"
+                            startDate.isBlank() -> "未设置（点击选择）"
+                            else -> "第一周周一：$startDate"
+                        },
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
                         text = when {
+                            !canEditStartDate -> "每个学期的开学日期独立保存"
                             startDate.isBlank() -> "设置后自动推算当前是第几周"
                             currentWeek != null -> "当前是第 $currentWeek 周"
                             else -> "日期格式有误，请重新选择"
@@ -147,11 +160,13 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(
-                    text = "修改",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                if (canEditStartDate) {
+                    Text(
+                        text = "修改",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
@@ -213,9 +228,11 @@ fun SettingsScreen(
             ) {
                 Button(onClick = {
                     val newId = settings.newTimetableId()
+                    var index = 1
+                    while (timetables.any { it.name == "自定义时间表 $index" }) index++
                     val cloned = ClassTimetable(
                         id = newId,
-                        name = "自定义时间表 ${timetables.size - 3}",
+                        name = "自定义时间表 $index",
                         periods = (timetables.firstOrNull { it.id == activeId }
                             ?: timetables.first()).periods
                     )
@@ -280,7 +297,7 @@ fun SettingsScreen(
                     pickerState.selectedDateMillis?.let { millis ->
                         val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
                         startDate = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                        settings.semesterStartDate = startDate
+                        settings.setSemesterStartDateFor(semesterId, startDate)
                         onChanged()
                     }
                     showDatePicker = false
@@ -414,8 +431,6 @@ private fun TimetableEditor(
                 }
         )
         timetable.periods.forEachIndexed { index, period ->
-            var startText by remember(timetable.id, index) { mutableStateOf(period.start) }
-            var endText by remember(timetable.id, index) { mutableStateOf(period.end) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "第${index + 1}节",
@@ -423,45 +438,65 @@ private fun TimetableEditor(
                     modifier = Modifier.width(46.dp)
                 )
                 TimeField(
-                    value = startText,
+                    value = period.start,
                     label = "上课",
-                    onCommit = { value ->
-                        startText = value
-                        onPeriodChange(index, PeriodTime(value, period.end))
-                    }
+                    onCommit = { onPeriodChange(index, period.copy(start = it)) }
                 )
                 Text(text = "—", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 4.dp))
                 TimeField(
-                    value = endText,
+                    value = period.end,
                     label = "下课",
-                    onCommit = { value ->
-                        endText = value
-                        onPeriodChange(index, PeriodTime(period.start, value))
-                    }
+                    onCommit = { onPeriodChange(index, period.copy(end = it)) }
                 )
             }
         }
     }
 }
 
-/** "HH:mm" 时间输入框，失焦/回车时校验并提交。 */
+/** "HH:mm" 时间输入框：本地草稿，失焦/回车时才校验并提交。 */
 @Composable
 private fun TimeField(
     value: String,
     label: String,
     onCommit: (String) -> Unit
 ) {
-    val valid = Regex("""^([01]\d|2[0-3]):[0-5]\d$""").matches(value)
+    var text by remember(value) { mutableStateOf(value) }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    fun commit() {
+        if (TIME_PATTERN.matches(text)) {
+            if (text != value) onCommit(text)
+        } else {
+            // 非法输入不落盘：失焦/完成时退回上一次有效时间
+            text = value
+        }
+    }
+
     OutlinedTextField(
-        value = value,
+        value = text,
         onValueChange = { input ->
-            val filtered = input.filter { it.isDigit() || it == ':' }.take(5)
-            onCommit(filtered)
+            // 逐字符只更新草稿，不触发设置落盘
+            text = input.filter { it.isDigit() || it == ':' }.take(5)
         },
         label = { Text(label) },
         singleLine = true,
-        isError = !valid,
+        isError = text.isNotEmpty() && !TIME_PATTERN.matches(text),
         textStyle = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.width(96.dp)
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            imeAction = androidx.compose.ui.text.input.ImeAction.Done
+        ),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+            onDone = {
+                keyboard?.hide()
+                commit()
+            }
+        ),
+        modifier = Modifier
+            .width(96.dp)
+            .onFocusChanged { focus ->
+                if (!focus.isFocused) commit()
+            }
     )
 }
+
+private val TIME_PATTERN = Regex("""^([01]\d|2[0-3]):[0-5]\d$""")

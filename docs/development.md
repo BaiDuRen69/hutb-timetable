@@ -251,8 +251,7 @@ grep -oE "<select[^>]*>" real.html
    通过 `secureStorage` 在登录页/设置页明确提示；凭据与偏好已拆分，
    `clearCredentials()` 与 `AppPrefs.clearPreferences()` 互不影响。
    后续再评估迁移到 DataStore + 自实现密钥派生。
-3. **release 签名与 R8 未配置**：目前只产出 debug APK，未做混淆与正式签名。
-4. **根目录 `课表查询-debug.apk` 是构建产物的副本**，用于拷贝到手机测试，
+3. **根目录 `课表查询-debug.apk` 是构建产物的副本**，用于拷贝到手机测试，
    与 `app/build/outputs/apk/debug/app-debug.apk` 内容一致；两处并存是有意为之。
 
 ## 待确认事项

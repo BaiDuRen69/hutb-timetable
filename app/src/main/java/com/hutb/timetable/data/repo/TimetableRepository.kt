@@ -93,7 +93,8 @@ class TimetableRepository(
      * 别的周次有缓存时由 [readLatestCache] 单独返回，供 UI 提示"可跳转查看"。
      */
     suspend fun readCache(query: ScheduleQuery): WeekSchedule? = withContext(Dispatchers.IO) {
-        cache.getSchedule(query.semesterId, query.week, scoped(query.cacheScope))
+        val scope = scoped(query.cacheScope) ?: return@withContext null
+        cache.getSchedule(query.semesterId, query.week, scope)
             ?.takeIf { it.week == query.week }
             ?.toSchedule()
     }
@@ -104,7 +105,8 @@ class TimetableRepository(
      * 仅用于"第 N 周有缓存，点此查看"的提示，调用方不得把它当当前周渲染。
      */
     suspend fun readLatestCache(query: ScheduleQuery): WeekSchedule? = withContext(Dispatchers.IO) {
-        cache.getLatestOfSemester(query.semesterId, scoped(query.cacheScope))?.toSchedule()
+        val scope = scoped(query.cacheScope) ?: return@withContext null
+        cache.getLatestOfSemester(query.semesterId, scope)?.toSchedule()
     }
 
     /** 清除本地课表/教室选项/学期缓存（保留登录凭据）。 */
@@ -123,7 +125,8 @@ class TimetableRepository(
      * 周次不匹配的缓存不上屏，避免显示错误周次的数据。
      */
     suspend fun readExactCache(query: ScheduleQuery): WeekSchedule? = withContext(Dispatchers.IO) {
-        cache.getSchedule(query.semesterId, query.week, scoped(query.cacheScope))
+        val scope = scoped(query.cacheScope) ?: return@withContext null
+        cache.getSchedule(query.semesterId, query.week, scope)
             ?.takeIf { it.week == query.week }
             ?.toSchedule()
     }
@@ -141,7 +144,7 @@ class TimetableRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Result.failure(e)
+                Result.failure(roomOptionFailure(e))
             }
         }
 
@@ -158,7 +161,7 @@ class TimetableRepository(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Result.failure(e)
+                Result.failure(roomOptionFailure(e))
             }
         }
 
@@ -177,20 +180,31 @@ class TimetableRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(roomOptionFailure(e))
         }
     }
 
-    /** 缓存按账号隔离，避免换账号后读到上一个人的课表。 */
-    private fun accountKey(): String = accountCacheKey(credentials.studentId)
+    /** 统一把网络/解析异常转成可展示的领域错误，避免 UI 收到裸异常。 */
+    private fun roomOptionFailure(e: Exception): HutbError =
+        e as? HutbError ?: HutbError.Unknown(e.message ?: "加载教室选项失败", e)
 
-    private fun scoped(scope: String): String = "$scope|u=${accountKey()}"
+    /**
+     * 账号缓存分区键；学号未知（首次登录尚未解析成功）时返回 null。
+     *
+     * 未知身份时**读写缓存一律跳过**：所有账号共用一个 `anon` 分区，
+     * 会让换账号后读到上一个人的课表。
+     */
+    private fun accountKey(): String? =
+        credentials.studentId.takeIf { it.isNotBlank() }?.let(::accountCacheKey)
+
+    private fun scoped(scope: String): String? = accountKey()?.let { "$scope|u=$it" }
 
     private fun putCache(schedule: WeekSchedule, scope: String) {
+        val scopedScope = scoped(scope) ?: return
         cache.putSchedule(
             semesterId = schedule.semesterId,
             week = schedule.week,
-            scope = scoped(scope),
+            scope = scopedScope,
             semesterName = schedule.semesterName,
             payload = encodeCourses(schedule.courses)
         )
@@ -209,6 +223,11 @@ class TimetableRepository(
             val semesters = api.fetchSemesters()
             cache.putSemesters(semesters.map { it.id to it.name })
             Result.success(semesters)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HutbError.NotLoggedIn) {
+            // 会话失效必须让 UI 引导重新登录，不能被旧缓存掩盖
+            Result.failure(e)
         } catch (e: Exception) {
             val cached = cache.getSemesters()
             if (cached.isNotEmpty()) {
@@ -237,6 +256,9 @@ class TimetableRepository(
 
     /** 保存登录成功后拿到的会话。 */
     fun persistSession(session: AuthSession) {
+        // 新会话可能属于另一个账号：旧学号立即作废，等 resolveIdentity 回填；
+        // 解析不到时缓存读写会被跳过，绝不把新账号的数据记到旧账号分区。
+        credentials.studentId = ""
         credentials.jsessionId = session.jsessionId
         credentials.serverId = session.serverId
         credentials.displayName = session.displayName
@@ -249,10 +271,22 @@ class TimetableRepository(
         api.syncSessionFromCookie("", "")
     }
 
-    /** 登录后解析学号/姓名，供账号级缓存与 JSON API 使用。 */
+    /**
+     * 登录后解析学号/姓名，供账号级缓存与 JSON API 使用。
+     *
+     * 会话失效与协程取消必须向上传播：前者要触发重新登录，
+     * 后者不能被当成"解析失败"继续走缓存路径。
+     */
     suspend fun resolveIdentity(): Boolean = withContext(Dispatchers.IO) {
-        val identity = runCatching { api.fetchStudentIdentity() }.getOrNull()
-            ?: return@withContext false
+        val identity = try {
+            api.fetchStudentIdentity()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HutbError.NotLoggedIn) {
+            throw e
+        } catch (e: Exception) {
+            null
+        } ?: return@withContext false
         updateIdentity(identity.first, identity.second)
         true
     }
@@ -265,12 +299,15 @@ class TimetableRepository(
 
     /** 记录最近一次浏览的学期与周次。 */
     fun rememberPosition(semesterId: String, week: Int) {
-        prefs.setLastSemesterIdFor(accountKey(), semesterId)
-        prefs.setLastWeekFor(accountKey(), week)
+        val key = accountKey() ?: return
+        prefs.setLastSemesterIdFor(key, semesterId)
+        prefs.setLastWeekFor(key, week)
     }
 
-    val lastSemesterId: String get() = prefs.lastSemesterIdFor(accountKey())
-    val lastWeek: Int get() = prefs.lastWeekFor(accountKey())
+    val lastSemesterId: String
+        get() = accountKey()?.let { prefs.lastSemesterIdFor(it) }.orEmpty()
+    val lastWeek: Int
+        get() = accountKey()?.let { prefs.lastWeekFor(it) } ?: 0
     val studentId: String get() = credentials.studentId
 
     // ---------------- 教室查询的选择记忆 ----------------

@@ -66,7 +66,9 @@ data class RoomPickerState(
     val draftBuildingOptions: List<RoomOption> = emptyList(),
     val draftClassroomOptions: List<RoomOption> = emptyList(),
     val draftBuildingsLoading: Boolean = false,
-    val draftClassroomsLoading: Boolean = false
+    val draftClassroomsLoading: Boolean = false,
+    /** 最近一次教室选项加载失败的原因（可重试） */
+    val errorMessage: String? = null
 )
 
 /**
@@ -107,8 +109,7 @@ class TimetableViewModel(
         TimetableUiState(
             shortRoomNames = repository.shortRoomNames,
             roomSortMode = repository.roomSortMode,
-            timetable = settings.activeTimetable,
-            semesterStartDate = settings.semesterStartDate
+            timetable = settings.activeTimetable
         )
     )
     val uiState: StateFlow<TimetableUiState> = _uiState.asStateFlow()
@@ -133,6 +134,9 @@ class TimetableViewModel(
             repository.restoreSession()
             _uiState.update { it.copy(session = it.session.copy(loggedIn = true)) }
             viewModelScope.launch {
+                // 身份未知（升级/首次登录未解析）时先解析学号：
+                // 课表缓存按账号分区，未知身份不能读写任何账号的缓存
+                ensureIdentity()
                 // 学期列表有持久缓存时先直接进课表，学期列表随后在后台刷新
                 val cached = repository.readSemestersCache()
                 if (currentSemesterOrDefault(cached) != null) {
@@ -144,6 +148,27 @@ class TimetableViewModel(
         }
     }
 
+    /**
+     * 确保当前会话已解析出学号。
+     *
+     * @return 身份是否可用；false 时仍可联网查询，但缓存读写会被仓库层跳过
+     */
+    private suspend fun ensureIdentity(): Boolean {
+        if (repository.studentId.isNotBlank()) return true
+        return try {
+            repository.resolveIdentity()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: HutbError.NotLoggedIn) {
+            _uiState.update {
+                it.copy(session = it.session.copy(loggedIn = false, expired = true))
+            }
+            false
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun currentSemesterOrDefault(semesters: List<Semester>): Semester? {
         val remembered = repository.lastSemesterId
         return semesters.firstOrNull { it.id == remembered } ?: semesters.firstOrNull()
@@ -152,14 +177,20 @@ class TimetableViewModel(
     /** 应用学期列表并设置默认周次。 */
     private fun applySemesters(semesters: List<Semester>) {
         val current = currentSemesterOrDefault(semesters) ?: return
+        // 旧版全局开学日期归到当前学期，之后各学期互不影响
+        settings.migrateLegacyStartDate(current.id)
+        val startDate = settings.semesterStartDateFor(current.id)
         val remembered = repository.lastSemesterId
         val week = if (remembered == current.id) {
-            settings.currentWeekNumber() ?: repository.lastWeek
+            settings.currentWeekNumber(current.id)
+                ?: repository.lastWeek.takeIf { it in 1..30 }
+                ?: 1
         } else {
-            settings.currentWeekNumber() ?: 1
+            settings.currentWeekNumber(current.id) ?: 1
         }
         _uiState.update {
             it.copy(
+                semesterStartDate = startDate,
                 schedule = it.schedule.copy(
                     semesters = semesters,
                     currentSemesterId = current.id,
@@ -169,29 +200,33 @@ class TimetableViewModel(
         }
     }
 
-    /** 设置页修改后回调，重新读取开学日期与作息时间表。 */
+    /** 设置页修改后回调，重新读取当前学期的开学日期与作息时间表。 */
     fun reloadSettings() {
+        val semesterId = _uiState.value.schedule.currentSemesterId
         val previousStartDate = _uiState.value.semesterStartDate
+        val startDate = settings.semesterStartDateFor(semesterId)
         _uiState.update {
             it.copy(
                 timetable = settings.activeTimetable,
-                semesterStartDate = settings.semesterStartDate
+                semesterStartDate = startDate
             )
         }
         // 只有"开学日期"变化才重算周次；
         // 改时间表名称/作息时不能把用户正在看的周次弹回当前周
-        if (previousStartDate != settings.semesterStartDate) {
-            val computed = settings.currentWeekNumber()
+        if (previousStartDate != startDate) {
+            val computed = settings.currentWeekNumber(semesterId)
             if (computed != null && computed != _uiState.value.schedule.currentWeek) {
                 switchWeek(computed)
             }
         }
     }
 
-    /** 更新开学日期并按新日期重新推算周次。 */
+    /** 更新当前学期的开学日期并按新日期重新推算周次。 */
     fun updateSemesterStartDate(date: String) {
-        settings.semesterStartDate = date
-        val week = settings.currentWeekNumber() ?: 1
+        val semesterId = _uiState.value.schedule.currentSemesterId
+        if (semesterId.isBlank()) return
+        settings.setSemesterStartDateFor(semesterId, date)
+        val week = settings.currentWeekNumber(semesterId) ?: 1
         loadedQuery = null
         _uiState.update {
             it.copy(
@@ -204,13 +239,18 @@ class TimetableViewModel(
     }
 
     /** 登录成功后调用。 */
-    fun onLoginSuccess(session: AuthSession, studentId: String, displayName: String) {
+    fun onLoginSuccess(session: AuthSession) {
         repository.persistSession(session)
-        repository.updateIdentity(studentId, displayName)
         _uiState.update { it.copy(session = it.session.copy(loggedIn = true, expired = false)) }
         viewModelScope.launch {
-            // 首次登录 App 不知道学号：先向后端解析，账号级缓存才能落到正确分区
-            repository.resolveIdentity()
+            // 首次登录 App 不知道学号：先向后端解析，账号级缓存才能落到正确分区；
+            // 解析完成前不读写缓存，避免记到上一个账号名下
+            ensureIdentity()
+            val cached = repository.readSemestersCache()
+            if (currentSemesterOrDefault(cached) != null) {
+                applySemesters(cached)
+                loadSchedule()
+            }
             loadSemesters()
         }
     }
@@ -245,9 +285,16 @@ class TimetableViewModel(
                     }
                 }
                 .onFailure { e ->
-                    if (_uiState.value.schedule.semesters.isEmpty()) {
+                    val expired = e is HutbError.NotLoggedIn
+                    if (_uiState.value.schedule.semesters.isEmpty() || expired) {
                         _uiState.update {
-                            it.copy(session = it.session.copy(errorMessage = e.message ?: "学期列表加载失败"))
+                            it.copy(
+                                session = it.session.copy(
+                                    expired = it.session.expired || expired,
+                                    loggedIn = if (expired) false else it.session.loggedIn,
+                                    errorMessage = e.message ?: "学期列表加载失败"
+                                )
+                            )
                         }
                     }
                 }
@@ -401,6 +448,7 @@ class TimetableViewModel(
     fun loadRoomOptions() {
         viewModelScope.launch {
             val semesterId = _uiState.value.schedule.currentSemesterId.takeIf { it.isNotBlank() }
+            _uiState.update { it.copy(room = it.room.copy(errorMessage = null)) }
 
             repository.loadCampuses(semesterId)
                 .onSuccess { campuses ->
@@ -413,7 +461,8 @@ class TimetableViewModel(
                         it.copy(
                             room = it.room.copy(
                                 campuses = campuses,
-                                selectedCampusId = campusId
+                                selectedCampusId = campusId,
+                                errorMessage = null
                             )
                         )
                     }
@@ -421,9 +470,7 @@ class TimetableViewModel(
                         loadBuildings(campusId, restoreBuilding = true)
                     }
                 }
-                .onFailure {
-                    // 校区列表拉取失败：保留空列表，由界面提示重试
-                }
+                .onFailure { handleRoomFailure(it) }
         }
     }
 
@@ -435,16 +482,38 @@ class TimetableViewModel(
     fun loadBuildings(campusId: String, restoreBuilding: Boolean = false) {
         viewModelScope.launch {
             val semesterId = _uiState.value.schedule.currentSemesterId.takeIf { it.isNotBlank() }
+            _uiState.update { it.copy(room = it.room.copy(errorMessage = null)) }
             repository.loadBuildings(campusId, semesterId)
                 .onSuccess { options ->
                     _uiState.update {
-                        it.copy(room = it.room.copy(buildingOptions = options))
+                        it.copy(
+                            room = it.room.copy(buildingOptions = options, errorMessage = null)
+                        )
                     }
                     if (restoreBuilding) restoreRememberedBuilding(options)
                 }
-                .onFailure {
-                    // 教学楼列表拉取失败：保留空列表，由界面提示重试
-                }
+                .onFailure { handleRoomFailure(it) }
+        }
+    }
+
+    /** 教室选项加载失败：登录失效走重新登录，其余错误在面板内提供重试。 */
+    private fun handleRoomFailure(e: Throwable) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        val expired = e is HutbError.NotLoggedIn
+        val message = e.message?.takeIf { it.isNotBlank() } ?: "教室选项加载失败"
+        _uiState.update {
+            it.copy(
+                room = it.room.copy(
+                    draftBuildingsLoading = false,
+                    draftClassroomsLoading = false,
+                    errorMessage = message
+                ),
+                session = it.session.copy(
+                    expired = it.session.expired || expired,
+                    loggedIn = if (expired) false else it.session.loggedIn,
+                    errorMessage = message
+                )
+            )
         }
     }
 
@@ -488,7 +557,8 @@ class TimetableViewModel(
                     room = it.room.copy(
                         draftBuildingsLoading = true,
                         draftBuildingOptions = emptyList(),
-                        draftClassroomOptions = emptyList()
+                        draftClassroomOptions = emptyList(),
+                        errorMessage = null
                     )
                 )
             }
@@ -498,14 +568,13 @@ class TimetableViewModel(
                         it.copy(
                             room = it.room.copy(
                                 draftBuildingOptions = options,
-                                draftBuildingsLoading = false
+                                draftBuildingsLoading = false,
+                                errorMessage = null
                             )
                         )
                     }
                 }
-                .onFailure {
-                    _uiState.update { it.copy(room = it.room.copy(draftBuildingsLoading = false)) }
-                }
+                .onFailure { handleRoomFailure(it) }
         }
     }
 
@@ -517,7 +586,8 @@ class TimetableViewModel(
                 it.copy(
                     room = it.room.copy(
                         draftClassroomsLoading = true,
-                        draftClassroomOptions = emptyList()
+                        draftClassroomOptions = emptyList(),
+                        errorMessage = null
                     )
                 )
             }
@@ -536,13 +606,12 @@ class TimetableViewModel(
                     it.copy(
                         room = it.room.copy(
                             draftClassroomOptions = scoped,
-                            draftClassroomsLoading = false
+                            draftClassroomsLoading = false,
+                            errorMessage = null
                         )
                     )
                 }
-            }.onFailure {
-                _uiState.update { it.copy(room = it.room.copy(draftClassroomsLoading = false)) }
-            }
+            }.onFailure { handleRoomFailure(it) }
         }
     }
 
@@ -596,6 +665,7 @@ class TimetableViewModel(
                         room = it.room.copy(
                             classroomOptions = scoped,
                             selectedBuilding = resolvedName,
+                            errorMessage = null,
                             buildingOptions = if (resolvedName != null && resolvedName != current.room.selectedBuilding) {
                                 current.room.buildingOptions.map {
                                     if (it.code == buildingId) it.copy(name = resolvedName) else it
@@ -609,10 +679,11 @@ class TimetableViewModel(
                 // 记住这次的教学楼选择；教室选择由 restoreRoom / applyRoomSelection / selectRoom 单独记
                 repository.rememberRoomScope(current.room.selectedCampusId, buildingId, resolvedName)
                 if (restoreRoom) validateRestoredRoom(scoped)
-            }.onFailure {
+            }.onFailure { e ->
                 _uiState.update {
                     it.copy(room = it.room.copy(classroomOptions = emptyList()))
                 }
+                handleRoomFailure(e)
             }
         }
     }
@@ -736,8 +807,10 @@ class TimetableViewModel(
     fun switchSemester(semesterId: String) {
         if (semesterId == _uiState.value.schedule.currentSemesterId) return
         loadedQuery = null
+        settings.migrateLegacyStartDate(semesterId)
         _uiState.update {
             it.copy(
+                semesterStartDate = settings.semesterStartDateFor(semesterId),
                 schedule = it.schedule.copy(
                     currentSemesterId = semesterId,
                     currentWeek = 1,
@@ -778,8 +851,7 @@ class TimetableViewModel(
         _uiState.value = TimetableUiState(
             shortRoomNames = repository.shortRoomNames,
             roomSortMode = repository.roomSortMode,
-            timetable = settings.activeTimetable,
-            semesterStartDate = settings.semesterStartDate
+            timetable = settings.activeTimetable
         )
     }
 

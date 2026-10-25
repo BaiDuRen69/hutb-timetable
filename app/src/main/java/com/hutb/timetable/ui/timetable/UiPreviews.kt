@@ -44,7 +44,9 @@ private fun WeekGridPreview() {
                 courses = PreviewCourses,
                 filter = ScheduleFilter(),
                 onCourseClick = {},
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                // 预览内容固定，不随真实日期出现"今天/现在"高亮
+                isCurrentWeek = false
             )
         }
     }

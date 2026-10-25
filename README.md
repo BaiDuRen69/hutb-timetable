@@ -17,14 +17,14 @@
 | **按教学楼/教室查询** | ✅ | `RoomPickerDialog.kt` + `parseRoomSchedule()` + `RoomMatrix.kt` |
 | 校区/教学楼/教室三级级联 | ✅ | `TimetableViewModel.loadCampuses/loadBuildings/loadClassrooms` |
 | 按某一天查询 | ⚠️ | 已按"周视图 + 周次切换"实现，未做独立单日视图 |
-| **星期 / 节次区间筛选** | ✅ | `ScheduleFilter.kt` + `ScheduleFilterBar.kt`（客户端过滤，见 `docs/protocol-facts.md` 1.6.3） |
+| **星期 / 节次区间筛选** | ✅ | `ScheduleFilter.kt` + `FilterSheet.kt`（客户端过滤，见 `docs/protocol-facts.md` 1.6.3） |
 | **精简教室名显示** | ✅ | `shortRoomName()`（core）+ `RoomMatrix` 左列 / 空教室列表（`乐知楼E101*(智慧)` → `E101`，星号与括号注记都剥掉；左列宽度按最长教室名自适应） |
 | **一键筛选空教室** | ✅ | `TimetableScreen` 工具条"只看空教室"（教室清单 − 当前筛选范围内有课的教室） |
 | **教室行排序切换** | ✅ | `RoomOrdering.kt`（core）+ 工具条排序菜单：楼栋优先（E101→E102→E201）、编号优先（E101→F101→E102）、楼层优先（1F 全部 → 2F 全部），选择持久化 |
 | **矩阵展示整栋楼全部教室** | ✅ | 行 = 有课教室 ∪ 教学楼教室清单（`RoomMatrix.allRooms`）：按星期/节次筛选后，当前时段没课的教室仍保留为空行；`roomIdentity()` 统一全/半角注记写法，避免同一教室重复成两行 |
-| **记住校区 / 教学楼 / 教室选择** | ✅ | `CredentialStore.lastCampusId/…` + `TimetableViewModel.restoreRemembered*`（下次进教室模式自动恢复） |
-| **设置页：开学时间 + 作息时间表** | ✅ | `AppSettings.kt` + `SettingsScreen.kt`（开学日期推算当前周次；内置夏/冬时制 × 南/北校区四套作息，可改可加自定义） |
-| **教室页头部滚动折叠** | ✅ | 教室矩阵下滑时逐步隐藏模式/周次/筛选栏（`TimetableScreen` 收缩容器 + `graphicsLayer` 平移） |
+| **记住校区 / 教学楼 / 教室选择** | ✅ | `AppPrefs.lastCampusId/…` + `TimetableViewModel.restoreRemembered*`（下次进教室模式自动恢复） |
+| **设置页：开学时间 + 作息时间表** | ✅ | `AppSettings.kt` + `SettingsScreen.kt`（开学日期**按学期**保存并推算当前周次；内置夏/冬时制 × 南/北校区四套作息，可改可加自定义） |
+| **教室矩阵粘性表头** | ✅ | `RoomMatrix` 固定星期/节次表头 + `LazyColumn` 行列表；表头与行共享同一个横向 `ScrollState`，大字体下行高/列宽同步放大 |
 | **连堂课合并大格子** | ✅ | `RoomMatrix` 起始格拉宽卡片横跨整个节次区间，不再是"课程卡 + 连堂续格" |
 | **登录页可返回 / 免重复登录** | ✅ | 已登录时右上角账号按钮打开登录页可返回，支持退出登录；移除无用的学号输入与"清除提示" |
 | JSON API 加速路径 | ⚠️ | 课表查询不走 JSON API（本校 `app.do` 实测全部要求登录态且返回无数据）；仅学期列表优先尝试 `getXnxq`，失败回退 HTML |

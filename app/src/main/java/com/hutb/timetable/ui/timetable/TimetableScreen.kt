@@ -60,6 +60,7 @@ import com.hutb.timetable.core.Course
 import com.hutb.timetable.core.RoomSortMode
 import com.hutb.timetable.core.ScheduleFilter
 import com.hutb.timetable.core.computeCurrentWeek
+import com.hutb.timetable.core.roomIdentity
 import com.hutb.timetable.core.sortRoomLabels
 import java.time.LocalDate
 
@@ -125,13 +126,14 @@ fun TimetableScreen(
         if (state.schedule.queryMode != QueryMode.ROOM || schedule == null) {
             emptyList()
         } else {
-            val occupied = visibleCourses.map { it.classroom.trim() }.toSet()
+            // 教室名写法可能不同（*(智慧) vs *（智慧）），按归一化身份比较
+            val occupied = visibleCourses.map { roomIdentity(it.classroom) }.toSet()
             val allRooms = state.room.classroomOptions.map { it.name }
                 .filter { it.isNotBlank() }
                 .ifEmpty { schedule.courses.map { it.classroom } }
             sortRoomLabels(
                 allRooms.map { it.trim() }
-                    .filter { it.isNotEmpty() && it !in occupied }
+                    .filter { it.isNotEmpty() && roomIdentity(it) !in occupied }
                     .distinct(),
                 state.roomSortMode
             )
@@ -140,6 +142,11 @@ fun TimetableScreen(
     if (state.schedule.queryMode != QueryMode.ROOM) {
         LaunchedEffect(Unit) { emptyRoomsOnly = false }
     }
+    // 选定具体教室后"只看空教室"没有意义：无论从选择器还是空教室列表进入，都关掉它，
+    // 否则之后清除教室选择会突然跳回空教室列表
+    LaunchedEffect(state.room.selectedRoomCode) {
+        if (state.room.selectedRoomCode != null) emptyRoomsOnly = false
+    }
     // 选了具体教室时，"空教室"清单没有意义（其它教室根本没查过），直接禁用
     val showEmptyRooms = state.schedule.queryMode == QueryMode.ROOM &&
         emptyRoomsOnly &&
@@ -147,10 +154,12 @@ fun TimetableScreen(
 
     // 教室矩阵可见时，头部工具栏与矩阵放进同一个滚动容器（头部随下滑自然隐藏）；
     // 其余情况头部固定，内容区自行处理滚动。
+    // 注意：筛选后没有命中课程时仍显示矩阵（含全部教室行），只在顶部加一行提示，
+    // 否则用户会以为加载失败或筛选条件失效。
     val showMatrix = state.schedule.queryMode == QueryMode.ROOM &&
         !showEmptyRooms &&
         state.schedule.data != null &&
-        visibleCourses.isNotEmpty()
+        (allRoomsForMatrix.isNotEmpty() || state.schedule.data.courses.isNotEmpty())
 
     val filterSummary = remember(visibleCourses, state.schedule.queryMode, state.schedule.filter) {
         if (!state.schedule.filter.isActive) {
@@ -281,12 +290,9 @@ fun TimetableScreen(
                                     }
                                 }
                                 if (state.schedule.fromCache) {
-                                    CacheBadge(
-                                        text = state.schedule.data
-                                            ?.takeIf { it.week != state.schedule.currentWeek }
-                                            ?.let { "第 ${it.week} 周缓存" }
-                                            ?: "本地缓存"
-                                    )
+                                    // 数据层只返回与请求周次一致的缓存，
+                                    // "第 N 周缓存"是死分支，统一显示"本地缓存"
+                                    CacheBadge(text = "本地缓存")
                                 }
                                 if (BuildConfig.DEBUG) {
                                     val issueCount = state.schedule.data?.parseIssues?.size ?: 0
@@ -372,6 +378,7 @@ fun TimetableScreen(
             HeaderBars(
                 state = state,
                 emptyRoomsOnly = emptyRoomsOnly,
+                emptyRoomsEnabled = state.room.selectedRoomCode == null,
                 filterSummary = filterSummary,
                 onSwitchQueryMode = onSwitchQueryMode,
                 onOpenFilterSheet = { showFilterSheet = true },
@@ -394,18 +401,36 @@ fun TimetableScreen(
 
             if (showMatrix) {
                 // 表头固定在顶部；矩阵内部用 LazyColumn 滚动（星期表头不随行滚走）
-                RoomMatrix(
-                    courses = state.schedule.data.courses,
-                    filter = state.schedule.filter,
-                    onCourseClick = { selectedCourse = it },
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    shortNames = state.shortRoomNames,
-                    buildingName = state.room.selectedBuilding,
-                    sortMode = state.roomSortMode,
-                    allRooms = allRoomsForMatrix
-                )
+                        .weight(1f)
+                ) {
+                    if (visibleCourses.isEmpty()) {
+                        Text(
+                            text = if (state.schedule.filter.isActive) {
+                                "当前筛选条件下没有课程，矩阵仍显示全部教室"
+                            } else {
+                                "本周还没有教室课程安排"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                    }
+                    RoomMatrix(
+                        courses = state.schedule.data.courses,
+                        filter = state.schedule.filter,
+                        onCourseClick = { selectedCourse = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        shortNames = state.shortRoomNames,
+                        buildingName = state.room.selectedBuilding,
+                        sortMode = state.roomSortMode,
+                        allRooms = allRoomsForMatrix
+                    )
+                }
             } else {
                 Box(modifier = Modifier.fillMaxSize()) {
                     when {
@@ -421,24 +446,46 @@ fun TimetableScreen(
                         }
 
                         state.schedule.data == null -> {
+                            val loggedOut = !state.session.loggedIn
                             EmptyView(
-                                text = if (state.schedule.queryMode == QueryMode.ROOM) {
-                                    "请选择教学楼或教室后查询"
-                                } else {
-                                    "暂无课表数据，点击刷新重试"
+                                text = when {
+                                    loggedOut -> "登录后即可查询课表"
+                                    state.schedule.queryMode == QueryMode.ROOM -> "请选择教学楼或教室后查询"
+                                    else -> "暂无课表数据，点击刷新重试"
                                 },
                                 icon = if (state.schedule.queryMode == QueryMode.ROOM) {
                                     Icons.Default.MeetingRoom
                                 } else {
                                     Icons.Outlined.EventBusy
                                 },
-                                actionLabel = if (state.schedule.queryMode == QueryMode.ROOM) {
-                                    "选择教室"
-                                } else {
-                                    "刷新"
+                                actionLabel = when {
+                                    loggedOut -> "登录"
+                                    state.schedule.queryMode == QueryMode.ROOM -> "选择教室"
+                                    else -> "刷新"
                                 },
-                                onAction = if (state.schedule.queryMode == QueryMode.ROOM) onPickRoom else onRefresh,
+                                onAction = when {
+                                    loggedOut -> onLogin
+                                    state.schedule.queryMode == QueryMode.ROOM -> onPickRoom
+                                    else -> onRefresh
+                                },
                                 modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
+
+                        // 教室模式下的空教室列表：当前筛选范围内没有课的教室。
+                        // 必须放在"整周无课程"分支之前：整周课表为空时，
+                        // 所有教室都是空教室，不能反过来报"没有数据"。
+                        showEmptyRooms -> {
+                            EmptyRoomsView(
+                                rooms = emptyRooms,
+                                shortNames = state.shortRoomNames,
+                                buildingName = state.room.selectedBuilding,
+                                // 点教室直接查看它的课表；空教室列表随之自动收起
+                                onRoomClick = { room ->
+                                    emptyRoomsOnly = false
+                                    onSelectRoom(room)
+                                },
+                                modifier = Modifier.fillMaxSize()
                             )
                         }
 
@@ -460,16 +507,6 @@ fun TimetableScreen(
                             )
                         }
 
-                        // 教室模式下的空教室列表：当前筛选范围内没有课的教室
-                        showEmptyRooms -> {
-                            EmptyRoomsView(
-                                rooms = emptyRooms,
-                                shortNames = state.shortRoomNames,
-                                buildingName = state.room.selectedBuilding,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
                         visibleCourses.isEmpty() -> {
                             EmptyView(
                                 text = "当前筛选条件下没有课程",
@@ -487,7 +524,9 @@ fun TimetableScreen(
                                 filter = state.schedule.filter,
                                 onCourseClick = { selectedCourse = it },
                                 modifier = Modifier.fillMaxSize(),
-                                timetable = state.timetable
+                                timetable = state.timetable,
+                                // 未设开学日期时退回旧行为（按本周显示今天/现在）
+                                isCurrentWeek = thisWeek == null || thisWeek == state.schedule.currentWeek
                             )
                         }
                     }

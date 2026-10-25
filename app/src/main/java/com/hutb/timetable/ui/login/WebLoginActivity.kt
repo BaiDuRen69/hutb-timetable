@@ -29,7 +29,8 @@ import com.hutb.timetable.R
  *
  * 登录动作在 WebView 中由用户手动完成（含滑块验证码）；
  * 登录成功后，服务端在 `jwgl.hutb.edu.cn` 域下发 `JSESSIONID` / `SERVERID`，
- * 这里读出 Cookie 并**向服务端验证会话有效**后再返回给调用方。
+ * 这里读出 Cookie 并返回给调用方。会话是否仍然有效以首次数据请求为准，
+ * 本页不额外发起服务端验证（那会与页面 UA/Cookie 路径产生误判）。
  */
 class WebLoginActivity : ComponentActivity() {
 
@@ -43,14 +44,9 @@ class WebLoginActivity : ComponentActivity() {
         /** 教务系统根地址：登录成功后会被重定向到这里。 */
         private const val EDU_ROOT = "http://jwgl.hutb.edu.cn/"
 
-        const val EXTRA_STUDENT_ID = "extra_student_id"
-        const val EXTRA_DISPLAY_NAME = "extra_display_name"
-
         /** 返回给调用方的会话标识。 */
         const val RESULT_JSESSION_ID = "result_jsession_id"
         const val RESULT_SERVER_ID = "result_server_id"
-        const val RESULT_DISPLAY_NAME = "result_display_name"
-        const val RESULT_STUDENT_ID = "result_student_id"
 
         /** 登录成功标志。 */
         const val RESULT_OK = Activity.RESULT_OK
@@ -58,19 +54,9 @@ class WebLoginActivity : ComponentActivity() {
         /** 与 [RESULT_OK] 配对的取消结果。 */
         const val RESULT_CANCELED = Activity.RESULT_CANCELED
 
-        fun start(context: Context, studentId: String = "", displayName: String = "") {
-            context.startActivity(intent(context, studentId, displayName))
-        }
-
         /** 构造登录页 Intent（供 Activity Result API 使用）。 */
-        fun intent(
-            context: Context,
-            studentId: String = "",
-            displayName: String = ""
-        ): Intent = Intent(context, WebLoginActivity::class.java).apply {
-            putExtra(EXTRA_STUDENT_ID, studentId)
-            putExtra(EXTRA_DISPLAY_NAME, displayName)
-        }
+        fun intent(context: Context): Intent =
+            Intent(context, WebLoginActivity::class.java)
     }
 
     private lateinit var webView: WebView
@@ -99,9 +85,15 @@ class WebLoginActivity : ComponentActivity() {
         applyWindowInsets()
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-        // 清掉上一次遗留的教务会话：否则 CAS 登录页一打开就会命中旧 Cookie，
-        // 被误判为"登录成功"，后续请求全部返回登录页（表现为"登录已失效"）
-        clearStaleEduCookies()
+        // 清空上一次遗留的全部 WebView Cookie（教务 + CAS）：
+        // 只按名字/路径删容易漏，且 CAS 的 TGC 还在时会被 SSO 直接送回原账号。
+        // removeAllCookies 是异步的，必须等回调后再加载登录页，
+        // 否则可能出现"旧 Cookie 尚未删完、页面已经开始认证"。
+        CookieManager.getInstance().removeAllCookies {
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) webView.loadUrl(CAS_LOGIN_URL)
+            }
+        }
 
         // 返回键：优先回退认证页历史，回到起点后关闭登录页返回 App
         onBackPressedDispatcher.addCallback(this) {
@@ -112,8 +104,6 @@ class WebLoginActivity : ComponentActivity() {
                 finish()
             }
         }
-
-        webView.loadUrl(CAS_LOGIN_URL)
     }
 
     /**
@@ -142,10 +132,9 @@ class WebLoginActivity : ComponentActivity() {
             // 用兼容模式而不是 ALWAYS_ALLOW，让 WebView 对可疑子资源保持默认拦截
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             cacheMode = WebSettings.LOAD_DEFAULT
-            // 登录页不需要访问本地文件/内容，也不需要保存表单数据
+            // 登录页不需要访问本地文件/内容
             allowFileAccess = false
             allowContentAccess = false
-            saveFormData = false
             userAgentString = "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
         }
@@ -205,17 +194,19 @@ class WebLoginActivity : ComponentActivity() {
      * 检查是否已登录成功。
      *
      * 必要条件：**当前页面已在教务系统域**，且教务域上存在 JSESSIONID。
+     * 会话 Cookie 可能挂在根路径或 `/jsxsd/` 路径下，两者都要检查。
      *
-     * 关键前提是 [clearStaleEduCookies] 已在开始登录时清掉旧会话——
+     * 关键前提是进入本页时已清空全部 WebView Cookie——
      * 因此这里看到的 Cookie 只可能由本次认证流程签发。
-     * 旧实现没有清理旧 Cookie，CAS 登录页一打开就命中了上次的过期会话，
-     * 被误判为"登录成功"，随后查课表全部返回登录页（表现为"登录已失效"）。
      */
     private fun checkLoginSuccess(url: String?) {
         if (loginSucceeded) return
         if (!isEduHost(url)) return
         val cookieManager = CookieManager.getInstance()
-        val cookies = cookieManager.getCookie(EDU_ROOT) ?: return
+        val cookies = buildList {
+            cookieManager.getCookie(EDU_ROOT)?.let(::add)
+            cookieManager.getCookie(EDU_ROOT.trimEnd('/') + "/jsxsd/")?.let(::add)
+        }.joinToString(";")
         val jsession = parseCookie(cookies, "JSESSIONID")
         if (jsession.isNullOrBlank()) return
         val serverId = parseCookie(cookies, "SERVERID").orEmpty()
@@ -244,33 +235,6 @@ class WebLoginActivity : ComponentActivity() {
         return host.equals("jwgl.hutb.edu.cn", ignoreCase = true)
     }
 
-    /**
-     * 清掉教务与 CAS 遗留的会话 Cookie。
-     *
-     * 只清 jwgl 的 JSESSIONID 不够：CAS 的 TGC/CASTGC 还在，
-     * 下次打开登录页会被 SSO 直接送回原账号，"切换账号"切不干净。
-     */
-    private fun clearStaleEduCookies() {
-        val cookieManager = CookieManager.getInstance()
-        listOf("/", "/jsxsd").forEach { path ->
-            listOf("JSESSIONID", "SERVERID").forEach { name ->
-                cookieManager.setCookie(EDU_ROOT, "$name=; Max-Age=0; Path=$path")
-            }
-        }
-        clearAllCookiesFor(CAS_LOGIN_URL)
-        cookieManager.flush()
-    }
-
-    private fun clearAllCookiesFor(url: String) {
-        val cookieManager = CookieManager.getInstance()
-        val cookies = cookieManager.getCookie(url) ?: return
-        cookies.split(";")
-            .map { it.substringBefore("=").trim() }
-            .filter { it.isNotEmpty() }
-            .forEach { name -> cookieManager.setCookie(url, "$name=; Max-Age=0; Path=/") }
-    }
-
-    /** 登录完成：同步 Cookie 并返回结果。 */
     private fun completeLogin(jsession: String, serverId: String) {
         loginSucceeded = true
 
@@ -290,8 +254,6 @@ class WebLoginActivity : ComponentActivity() {
             Intent().apply {
                 putExtra(RESULT_JSESSION_ID, jsession)
                 putExtra(RESULT_SERVER_ID, serverId)
-                putExtra(RESULT_DISPLAY_NAME, intent.getStringExtra(EXTRA_DISPLAY_NAME).orEmpty())
-                putExtra(RESULT_STUDENT_ID, intent.getStringExtra(EXTRA_STUDENT_ID).orEmpty())
             }
         )
         finish()
