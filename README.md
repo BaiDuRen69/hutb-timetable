@@ -64,7 +64,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ```bash
 gradle :core:unitTest --console=plain
-# → JUnit version 4.13.2 / OK (100 tests)
+# → JUnit version 4.13.2 / OK (104 tests)
 ```
 
 测试类自动发现，新增 `*Test.kt` 无需修改构建脚本（细节见 `docs/development.md`）。
