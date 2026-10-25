@@ -8,6 +8,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +40,8 @@ import com.hutb.timetable.ui.timetable.SnapshotDialog
 import com.hutb.timetable.ui.timetable.TimetableScreen
 import com.hutb.timetable.ui.timetable.TimetableViewModel
 import com.hutb.timetable.ui.theme.HutbTimetableTheme
+import com.hutb.timetable.ui.theme.ThemeMode
+import com.hutb.timetable.ui.theme.ThemeStyle
 import kotlinx.coroutines.delay
 
 /**
@@ -77,7 +87,13 @@ class MainActivity : ComponentActivity() {
         val container = (application as HutbApp).container
 
         setContent {
-            HutbTimetableTheme {
+            var themeMode by remember {
+                mutableStateOf(ThemeMode.fromId(container.settings.themeModeId))
+            }
+            var themeStyle by remember {
+                mutableStateOf(ThemeStyle.fromId(container.settings.themeStyleId))
+            }
+            HutbTimetableTheme(themeMode = themeMode, themeStyle = themeStyle) {
                 val vm: TimetableViewModel = viewModel(
                     factory = TimetableViewModel.factory(container.repository, container.settings)
                 )
@@ -200,7 +216,13 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    if (showSettings) {
+                    AnimatedVisibility(
+                        visible = showSettings,
+                        enter = fadeIn(tween(180)) +
+                            slideInHorizontally(tween(220)) { it / 8 },
+                        exit = fadeOut(tween(140)) +
+                            slideOutHorizontally(tween(180)) { it / 8 }
+                    ) {
                         // 设置页自身不带背景色，覆盖层模式下包一层不透明背景
                         Box(
                             modifier = Modifier
@@ -210,6 +232,16 @@ class MainActivity : ComponentActivity() {
                             SettingsScreen(
                                 settings = container.settings,
                                 semesterId = state.schedule.currentSemesterId,
+                                themeMode = themeMode,
+                                themeStyle = themeStyle,
+                                onThemeModeChange = { mode ->
+                                    themeMode = mode
+                                    container.settings.themeModeId = mode.id
+                                },
+                                onThemeStyleChange = { style ->
+                                    themeStyle = style
+                                    container.settings.themeStyleId = style.id
+                                },
                                 onBack = { showSettings = false },
                                 onChanged = { vm.reloadSettings() },
                                 secureStorage = container.credentials.secureStorage,
@@ -225,7 +257,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    if (showLogin) {
+                    AnimatedVisibility(
+                        visible = showLogin,
+                        enter = fadeIn(tween(180)) +
+                            slideInVertically(tween(220)) { it / 10 },
+                        exit = fadeOut(tween(140)) +
+                            slideOutVertically(tween(180)) { it / 10 }
+                    ) {
                         LoginScreen(
                             loading = false,
                             errorMessage = state.session.errorMessage,

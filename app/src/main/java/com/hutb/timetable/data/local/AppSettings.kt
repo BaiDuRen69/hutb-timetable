@@ -144,6 +144,16 @@ class AppSettings(context: Context) {
     fun currentWeekNumber(semesterId: String): Int? =
         computeCurrentWeek(semesterStartDateFor(semesterId), LocalDate.now())
 
+    /** 深浅模式（system / light / dark），UI 层负责映射成枚举。 */
+    var themeModeId: String
+        get() = prefs.getString(KEY_THEME_MODE, "system") ?: "system"
+        set(value) = prefs.edit().putString(KEY_THEME_MODE, value).apply()
+
+    /** 主题配色 id（blue / green / purple / orange / rose）。 */
+    var themeStyleId: String
+        get() = prefs.getString(KEY_THEME_STYLE, "blue") ?: "blue"
+        set(value) = prefs.edit().putString(KEY_THEME_STYLE, value).apply()
+
     private fun keyStart(semesterId: String): String = "$KEY_SEMESTER_START_PREFIX$semesterId"
 
     fun newTimetableId(): String =
@@ -194,5 +204,7 @@ class AppSettings(context: Context) {
         /** 旧版本遗留的全局开学日期，仅用于迁移。 */
         private const val KEY_SEMESTER_START = "semester_start_date"
         private const val KEY_SEMESTER_START_PREFIX = "semester_start_"
+        private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_THEME_STYLE = "theme_style"
     }
 }

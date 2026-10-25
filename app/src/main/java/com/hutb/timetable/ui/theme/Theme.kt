@@ -2,6 +2,7 @@ package com.hutb.timetable.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -9,8 +10,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -137,16 +140,161 @@ val HutbShapes = Shapes(
 )
 
 /**
- * 应用主题：跟随系统深浅色。
+ * 深浅模式。默认跟随系统，用户可在设置中强制浅色/深色。
+ */
+enum class ThemeMode(val id: String, val label: String) {
+    SYSTEM("system", "跟随系统"),
+    LIGHT("light", "浅色"),
+    DARK("dark", "深色");
+
+    companion object {
+        fun fromId(id: String): ThemeMode = entries.firstOrNull { it.id == id } ?: SYSTEM
+    }
+}
+
+/**
+ * 主题配色。
+ *
+ * 只替换主色系（primary / primaryContainer）并用它调和 secondary，
+ * 中性表面保持同一套灰阶，避免 5 套主题各写一份完整 ColorScheme 后互相漂移。
+ * tertiary 仍是暖金色提示色，不与主色争抢注意力。
+ */
+enum class ThemeStyle(
+    val id: String,
+    val label: String,
+    val preview: Color,
+    private val lightPrimary: Color,
+    private val lightOnPrimary: Color,
+    private val lightPrimaryContainer: Color,
+    private val lightOnPrimaryContainer: Color,
+    private val darkPrimary: Color,
+    private val darkOnPrimary: Color,
+    private val darkPrimaryContainer: Color,
+    private val darkOnPrimaryContainer: Color
+) {
+    BLUE(
+        id = "blue",
+        label = "青蓝",
+        preview = Color(0xFF1B5E9E),
+        lightPrimary = Color(0xFF1B5E9E),
+        lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFD3E4F7),
+        lightOnPrimaryContainer = Color(0xFF0A2A47),
+        darkPrimary = Color(0xFF8AB8E8),
+        darkOnPrimary = Color(0xFF0A2A47),
+        darkPrimaryContainer = Color(0xFF1B5E9E),
+        darkOnPrimaryContainer = Color(0xFFD3E4F7)
+    ),
+    GREEN(
+        id = "green",
+        label = "竹绿",
+        preview = Color(0xFF2F6B4F),
+        lightPrimary = Color(0xFF2F6B4F),
+        lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFD3EBDD),
+        lightOnPrimaryContainer = Color(0xFF0B2B1B),
+        darkPrimary = Color(0xFF9CD3B4),
+        darkOnPrimary = Color(0xFF06301C),
+        darkPrimaryContainer = Color(0xFF2F6B4F),
+        darkOnPrimaryContainer = Color(0xFFD3EBDD)
+    ),
+    PURPLE(
+        id = "purple",
+        label = "紫藤",
+        preview = Color(0xFF6A4C93),
+        lightPrimary = Color(0xFF6A4C93),
+        lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFEADDF6),
+        lightOnPrimaryContainer = Color(0xFF2A1245),
+        darkPrimary = Color(0xFFD3B8F0),
+        darkOnPrimary = Color(0xFF321A50),
+        darkPrimaryContainer = Color(0xFF6A4C93),
+        darkOnPrimaryContainer = Color(0xFFEADDF6)
+    ),
+    ORANGE(
+        id = "orange",
+        label = "暖橙",
+        preview = Color(0xFF8A4A12),
+        lightPrimary = Color(0xFF8A4A12),
+        lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFFFDCC7),
+        lightOnPrimaryContainer = Color(0xFF331A05),
+        darkPrimary = Color(0xFFFFB98A),
+        darkOnPrimary = Color(0xFF4A2500),
+        darkPrimaryContainer = Color(0xFF8A4A12),
+        darkOnPrimaryContainer = Color(0xFFFFDCC7)
+    ),
+    ROSE(
+        id = "rose",
+        label = "绛桃",
+        preview = Color(0xFF8F3F5A),
+        lightPrimary = Color(0xFF8F3F5A),
+        lightOnPrimary = Color.White,
+        lightPrimaryContainer = Color(0xFFFFD9E2),
+        lightOnPrimaryContainer = Color(0xFF3B0A1C),
+        darkPrimary = Color(0xFFFFB1C6),
+        darkOnPrimary = Color(0xFF561F33),
+        darkPrimaryContainer = Color(0xFF8F3F5A),
+        darkOnPrimaryContainer = Color(0xFFFFD9E2)
+    );
+
+    fun lightScheme(): ColorScheme = LightColors.copy(
+        primary = lightPrimary,
+        onPrimary = lightOnPrimary,
+        primaryContainer = lightPrimaryContainer,
+        onPrimaryContainer = lightOnPrimaryContainer,
+        inversePrimary = darkPrimary,
+        secondary = lerp(LightColors.secondary, lightPrimary, 0.6f),
+        secondaryContainer = lerp(LightColors.secondaryContainer, lightPrimaryContainer, 0.7f),
+        onSecondaryContainer = lerp(
+            LightColors.onSecondaryContainer,
+            lightOnPrimaryContainer,
+            0.5f
+        ),
+        surfaceTint = lightPrimary
+    )
+
+    fun darkScheme(): ColorScheme = DarkColors.copy(
+        primary = darkPrimary,
+        onPrimary = darkOnPrimary,
+        primaryContainer = darkPrimaryContainer,
+        onPrimaryContainer = darkOnPrimaryContainer,
+        inversePrimary = lightPrimary,
+        secondary = lerp(DarkColors.secondary, darkPrimary, 0.6f),
+        secondaryContainer = lerp(DarkColors.secondaryContainer, darkPrimaryContainer, 0.7f),
+        onSecondaryContainer = lerp(
+            DarkColors.onSecondaryContainer,
+            darkOnPrimaryContainer,
+            0.5f
+        ),
+        surfaceTint = darkPrimary
+    )
+
+    companion object {
+        fun fromId(id: String): ThemeStyle = entries.firstOrNull { it.id == id } ?: BLUE
+    }
+}
+
+/**
+ * 应用主题：深浅模式 + 配色均由用户选择。
  */
 @Composable
 fun HutbTimetableTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    themeStyle: ThemeStyle = ThemeStyle.BLUE,
     content: @Composable () -> Unit
 ) {
+    val darkTheme = when (themeMode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+    val colorScheme = remember(themeStyle, darkTheme) {
+        if (darkTheme) themeStyle.darkScheme() else themeStyle.lightScheme()
+    }
     CompositionLocalProvider(LocalIsDarkTheme provides darkTheme) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = colorScheme,
             typography = HutbTypography,
             shapes = HutbShapes,
             content = content

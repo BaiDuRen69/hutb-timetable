@@ -54,4 +54,32 @@ class WeekNumberTest {
         assertNull(computeCurrentWeek("not-a-date", date("2026-09-07")))
         assertNull(computeCurrentWeek("2026/09/07", date("2026-09-07")))
     }
+
+    @Test
+    fun `由当前周次反推开学日期可往返`() {
+        val today = date("2026-10-21") // 周三
+        listOf(1, 2, 5, 12, 30).forEach { week ->
+            val start = semesterStartForWeek(week, today)
+            assertEquals(week, computeCurrentWeek(start, today))
+        }
+    }
+
+    @Test
+    fun `反推开学日期以周一为起点`() {
+        // 2026-10-25 是周日，第 5 周的第一周周一应为 2026-09-21
+        assertEquals("2026-09-21", semesterStartForWeek(5, date("2026-10-25")))
+        assertEquals("2026-10-19", semesterStartForWeek(1, date("2026-10-25")))
+    }
+
+    @Test
+    fun `反推周次超界时截断`() {
+        assertEquals(
+            semesterStartForWeek(1, date("2026-10-25")),
+            semesterStartForWeek(0, date("2026-10-25"))
+        )
+        assertEquals(
+            semesterStartForWeek(30, date("2026-10-25")),
+            semesterStartForWeek(99, date("2026-10-25"))
+        )
+    }
 }

@@ -2,28 +2,40 @@ package com.hutb.timetable.ui.timetable
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -121,7 +133,25 @@ fun RoomMatrix(
 
     val gridLine = MaterialTheme.colorScheme.outlineVariant
     val gridWidth = slotWidth * (visibleDays.size * visibleSlots.size)
-    val horizontalScroll = rememberScrollState()
+    val gridWidthPx = with(density) { gridWidth.toPx() }
+
+    // 表头与所有行共用同一个横向偏移量，内容用 graphicsLayer 平移。
+    // 不再用 horizontalScroll：拖动时它会让每个可见行重新测量 42 个格子，大字体下明显掉帧。
+    // 手势节点放在每行网格上（而不是 LazyColumn 外层），否则会抢走纵向滚动。
+    var viewportWidthPx by remember { mutableIntStateOf(0) }
+    var horizontalOffset by remember { mutableFloatStateOf(0f) }
+    var maxOffsetPx by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(gridWidthPx, viewportWidthPx) {
+        maxOffsetPx = (gridWidthPx - viewportWidthPx).coerceAtLeast(0f)
+        horizontalOffset = horizontalOffset.coerceIn(0f, maxOffsetPx)
+    }
+    val horizontalState = rememberScrollableState { delta ->
+        // scrollable 的 delta 与内容位移方向相反：左滑为负，偏移量应增加
+        val next = (horizontalOffset - delta).coerceIn(0f, maxOffsetPx)
+        val consumed = horizontalOffset - next
+        horizontalOffset = next
+        consumed
+    }
 
     Column(modifier = modifier) {
         // ---- 固定表头 ----
@@ -133,78 +163,113 @@ fun RoomMatrix(
                 background = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Column(modifier = Modifier.horizontalScroll(horizontalScroll)) {
-                Row {
-                    visibleDays.forEach { weekday ->
-                        MatrixHeaderCell(
-                            text = WEEKDAY_NAMES[weekday - 1],
-                            width = slotWidth * visibleSlots.size,
-                            height = dayHeaderHeight,
-                            background = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Row {
-                    visibleDays.forEach { _ ->
-                        visibleSlots.forEach { slot ->
-                            MatrixHeaderCell(
-                                text = slot.shortLabel,
-                                width = slotWidth,
-                                height = slotHeaderHeight,
-                                background = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .scrollable(
+                        state = horizontalState,
+                        orientation = Orientation.Horizontal,
+                        flingBehavior = ScrollableDefaults.flingBehavior()
+                    )
+                    .clipToBounds()
+            ) {
+                StartAlignedContent(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .requiredWidth(gridWidth)
+                            .graphicsLayer { translationX = -horizontalOffset }
+                    ) {
+                        Row {
+                            visibleDays.forEach { weekday ->
+                                MatrixHeaderCell(
+                                    text = WEEKDAY_NAMES[weekday - 1],
+                                    width = slotWidth * visibleSlots.size,
+                                    height = dayHeaderHeight,
+                                    background = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Row {
+                            visibleDays.forEach { _ ->
+                                visibleSlots.forEach { slot ->
+                                    MatrixHeaderCell(
+                                        text = slot.shortLabel,
+                                        width = slotWidth,
+                                        height = slotHeaderHeight,
+                                        background = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // ---- 行（LazyColumn：表头固定，行滚动） ----
-        LazyColumn(modifier = Modifier.weight(1f)) {
-            items(rows, key = { it.label }) { row ->
-                Row(modifier = Modifier.height(rowHeight)) {
-                    Box(
-                        modifier = Modifier
-                            .width(roomColumnWidth)
-                            .fillMaxHeight()
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .drawBehind {
-                                drawLine(
-                                    gridLine,
-                                    Offset(0f, size.height),
-                                    Offset(size.width, size.height),
-                                    strokeWidth = 0.5.dp.toPx()
+        // ---- 行（LazyColumn：表头固定，行滚动；横向手势挂在每行网格上） ----
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .onSizeChanged { viewportWidthPx = it.width }
+        ) {
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(rows, key = { it.label }) { row ->
+                    Row(modifier = Modifier.height(rowHeight)) {
+                        Box(
+                            modifier = Modifier
+                                .width(roomColumnWidth)
+                                .fillMaxHeight()
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .drawWithCache {
+                                    val stroke = 0.5.dp.toPx()
+                                    onDrawBehind {
+                                        drawLine(
+                                            gridLine,
+                                            Offset(0f, size.height),
+                                            Offset(size.width, size.height),
+                                            strokeWidth = stroke
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = if (shortNames) shortRoomName(row.label, buildingName) else row.label,
+                                style = roomTextStyle,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .scrollable(
+                                    state = horizontalState,
+                                    orientation = Orientation.Horizontal,
+                                    flingBehavior = ScrollableDefaults.flingBehavior()
+                                )
+                                .clipToBounds()
+                        ) {
+                            StartAlignedContent(modifier = Modifier.fillMaxWidth()) {
+                                RoomRow(
+                                    roomCourses = row.courses,
+                                    visibleDays = visibleDays,
+                                    visibleSlots = visibleSlots,
+                                    rowHeight = rowHeight,
+                                    slotWidth = slotWidth,
+                                    gridLine = gridLine,
+                                    onCourseClick = onCourseClick,
+                                    modifier = Modifier
+                                        .requiredWidth(gridWidth)
+                                        .graphicsLayer { translationX = -horizontalOffset }
                                 )
                             }
-                            .padding(horizontal = 4.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Text(
-                            text = if (shortNames) shortRoomName(row.label, buildingName) else row.label,
-                            style = roomTextStyle,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .horizontalScroll(horizontalScroll)
-                    ) {
-                        RoomRow(
-                            roomCourses = row.courses,
-                            visibleDays = visibleDays,
-                            visibleSlots = visibleSlots,
-                            gridWidth = gridWidth,
-                            rowHeight = rowHeight,
-                            slotWidth = slotWidth,
-                            gridLine = gridLine,
-                            onCourseClick = onCourseClick
-                        )
+                        }
                     }
                 }
             }
@@ -230,11 +295,11 @@ private fun RoomRow(
     roomCourses: List<Course>,
     visibleDays: List<Int>,
     visibleSlots: List<PeriodSlot>,
-    gridWidth: Dp,
     rowHeight: Dp,
     slotWidth: Dp,
     gridLine: androidx.compose.ui.graphics.Color,
-    onCourseClick: (Course) -> Unit
+    onCourseClick: (Course) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val placements = remember(roomCourses, visibleDays, visibleSlots) {
         roomCourses.mapNotNull { course ->
@@ -254,19 +319,32 @@ private fun RoomRow(
     }
 
     Box(
-        modifier = Modifier
-            .width(gridWidth)
+        modifier = modifier
             .height(rowHeight)
             .background(MaterialTheme.colorScheme.surface)
-            .drawBehind {
+            .drawWithCache {
                 val stroke = 0.5.dp.toPx()
                 val columnPx = slotWidth.toPx()
-                var x = columnPx
-                while (x < size.width - 0.5f) {
-                    drawLine(gridLine, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
-                    x += columnPx
+                val totalWidth = size.width
+                // 网格线位置只随尺寸/列宽变化，缓存起来避免拖动时每帧重算
+                val columnXs = buildList {
+                    var x = columnPx
+                    while (x < totalWidth - 0.5f) {
+                        add(x)
+                        x += columnPx
+                    }
                 }
-                drawLine(gridLine, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = stroke)
+                onDrawBehind {
+                    columnXs.forEach { x ->
+                        drawLine(gridLine, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+                    }
+                    drawLine(
+                        gridLine,
+                        Offset(0f, size.height),
+                        Offset(size.width, size.height),
+                        strokeWidth = stroke
+                    )
+                }
             }
     ) {
         placements.forEach { placement ->

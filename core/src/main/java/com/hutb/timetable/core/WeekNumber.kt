@@ -26,3 +26,19 @@ fun computeCurrentWeek(semesterStartDate: String, today: LocalDate): Int? {
         weeks.toInt().coerceIn(1, 30)
     }.getOrNull()
 }
+
+/**
+ * 由"今天是开学第 [week] 周"反推第一周周一。
+ *
+ * 与 [computeCurrentWeek] 互逆：用户只需知道自己现在第几周，
+ * 不需要翻日历找开学日期。周次超出 1..30 时按边界截断。
+ *
+ * @param today 计算基准日（生产代码传 LocalDate.now()，测试传固定日期）
+ * @return 第一周周一日期，"yyyy-MM-dd"
+ */
+fun semesterStartForWeek(week: Int, today: LocalDate): String {
+    val clamped = week.coerceIn(1, 30)
+    val monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    return monday.minusWeeks((clamped - 1).toLong())
+        .format(DateTimeFormatter.ISO_LOCAL_DATE)
+}
