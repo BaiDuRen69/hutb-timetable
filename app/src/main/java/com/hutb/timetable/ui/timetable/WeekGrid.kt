@@ -124,8 +124,9 @@ fun WeekGrid(
     val outline = MaterialTheme.colorScheme.outlineVariant
     val primary = MaterialTheme.colorScheme.primary
 
-    val headerHeight = 44.dp
-    val periodHeight = 64.dp
+    val fontScale = LocalDensity.current.fontScale.coerceIn(1f, 1.6f)
+    val headerHeight = (44 * minOf(fontScale, 1.4f)).dp
+    val periodHeight = (64 * fontScale).dp
     val dayColumnWidth = 116.dp
     val periodColumnWidth = 70.dp
     val verticalScroll = rememberScrollState()

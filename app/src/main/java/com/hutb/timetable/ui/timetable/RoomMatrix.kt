@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,7 +30,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.hutb.timetable.core.Course
 import com.hutb.timetable.core.RoomSortMode
@@ -36,18 +37,19 @@ import com.hutb.timetable.core.ScheduleFilter
 import com.hutb.timetable.core.roomIdentity
 import com.hutb.timetable.core.shortRoomName
 import com.hutb.timetable.core.sortRoomLabels
+import kotlin.math.min
 
 /**
  * 教室课表矩阵。
  *
- * 行是教室，列是 星期 × 节次对；没课的教室也保留一行（来自教学楼教室清单），
- * 便于一眼看出"这间教室当前时段空着"。
+ * 行是教室，列是 星期 × 节次对；没课的教室也保留一行（来自教学楼教室清单）。
  *
- * 性能：一行不是 42 个格子节点，而是单个 Box——网格线用 drawBehind 画，
- * 只为有课的节次摆放卡片。整栋楼约 250 个节点，切换筛选时不至于卡顿。
+ * 结构：
+ * - 表头固定在顶部（教室列 + 星期/节次表头），行列表用 LazyColumn 纵向滚动；
+ * - 左侧教室列固定，右侧网格横向滚动，表头与所有行共享同一个 ScrollState；
+ * - 行高/列宽/表头高度随系统字体缩放放大，避免大字体裁切。
  *
- * 本组件不含纵向滚动：纵向滚动由页面级容器持有（头部与矩阵一起滚动），
- * 横向滚动只在右侧节次网格内。
+ * 性能：一行是单个 Box + drawBehind 网格线，只为有课的节次摆卡片。
  */
 @Composable
 fun RoomMatrix(
@@ -61,21 +63,17 @@ fun RoomMatrix(
     /** 教学楼的全部教室清单；没课的教室也会占一行 */
     allRooms: List<String> = emptyList()
 ) {
-    // 节次没解析出来时按第 1 节起算，否则课程会整格漏掉
     val normalized = remember(courses) {
         courses.map { course ->
             val start = course.startPeriod.coerceAtLeast(1)
             course.copy(startPeriod = start, endPeriod = course.endPeriod.coerceAtLeast(start))
         }
     }
-    // 只留下筛选范围内的课程
     val visible = remember(normalized, filter) { filter.apply(normalized) }
     val visibleDays = remember(filter) { filter.visibleWeekdays() }
     val visibleSlots = remember(filter) {
         PERIOD_SLOTS.filter { it.start <= filter.endPeriod && it.end >= filter.startPeriod }
     }
-    // 行 = 有课的教室 ∪ 教学楼教室清单：没课的教室也占一行，
-    // 两个来源的注记写法可能不同（*(智慧) vs *（智慧）），按 roomIdentity 合并。
     val rows = remember(visible, allRooms, sortMode) {
         val labels = LinkedHashMap<String, String>()
         val coursesByKey = LinkedHashMap<String, MutableList<Course>>()
@@ -97,9 +95,16 @@ fun RoomMatrix(
         }
     }
 
-    // 教室名列宽按最长显示名自适应；测量与渲染必须共用同一个 TextStyle
-    val roomTextStyle = MaterialTheme.typography.labelSmall
+    // 大字体下放大行高/表头/列宽，保证 1.5x~2x 字号不裁切
     val density = LocalDensity.current
+    val fontScale = density.fontScale.coerceIn(1f, 1.6f)
+    val rowHeight = (54 * fontScale).dp
+    val dayHeaderHeight = (30 * min(fontScale, 1.4f)).dp
+    val slotHeaderHeight = (22 * min(fontScale, 1.4f)).dp
+    val slotWidth = (96 * min(fontScale, 1.4f)).dp
+
+    // 教室名列宽按最长显示名自适应；测量与渲染共用同一 TextStyle
+    val roomTextStyle = MaterialTheme.typography.labelSmall
     val textMeasurer = rememberTextMeasurer()
     val displayNames = remember(rows, shortNames, buildingName) {
         rows.mapTo(mutableSetOf()) {
@@ -108,94 +113,100 @@ fun RoomMatrix(
     }
     val roomColumnWidth = remember(displayNames, density) {
         val maxPx = displayNames.maxOfOrNull { name ->
-            textMeasurer.measure(
-                text = name,
-                style = roomTextStyle,
-                maxLines = 1
-            ).size.width
+            textMeasurer.measure(text = name, style = roomTextStyle, maxLines = 1).size.width
         } ?: 0
-        ((maxPx / density.density).dp + 12.dp).coerceIn(44.dp, 132.dp)
+        val maxWidth = (132 * min(density.fontScale, 1.5f)).dp
+        ((maxPx / density.density).dp + 12.dp).coerceIn(44.dp, maxWidth)
     }
 
     val gridLine = MaterialTheme.colorScheme.outlineVariant
-    val gridColumns = visibleDays.size * visibleSlots.size
-    val gridWidth = SLOT_COLUMN_WIDTH * gridColumns
+    val gridWidth = slotWidth * (visibleDays.size * visibleSlots.size)
     val horizontalScroll = rememberScrollState()
 
-    Row(modifier = modifier) {
-        // 左边的教室名列固定，不随右侧横向滚动
-        Column(modifier = Modifier.width(roomColumnWidth)) {
+    Column(modifier = modifier) {
+        // ---- 固定表头 ----
+        Row {
             MatrixHeaderCell(
                 text = "教室",
                 width = roomColumnWidth,
-                height = DAY_HEADER_HEIGHT + SLOT_HEADER_HEIGHT,
+                height = dayHeaderHeight + slotHeaderHeight,
                 background = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            for (row in rows) {
-                Box(
-                    modifier = Modifier
-                        .width(roomColumnWidth)
-                        .height(ROW_HEIGHT)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .drawBehind {
-                            val stroke = 0.5.dp.toPx()
-                            drawLine(
-                                gridLine,
-                                Offset(0f, size.height),
-                                Offset(size.width, size.height),
-                                strokeWidth = stroke
-                            )
-                        }
-                        .padding(horizontal = 4.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Text(
-                        text = if (shortNames) shortRoomName(row.label, buildingName) else row.label,
-                        style = roomTextStyle,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
-        // 右侧的节次网格
-        Column(modifier = Modifier.horizontalScroll(horizontalScroll)) {
-            Row {
-                visibleDays.forEach { weekday ->
-                    MatrixHeaderCell(
-                        text = WEEKDAY_NAMES[weekday - 1],
-                        width = SLOT_COLUMN_WIDTH * visibleSlots.size,
-                        height = DAY_HEADER_HEIGHT,
-                        background = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            Row {
-                visibleDays.forEach { _ ->
-                    visibleSlots.forEach { slot ->
+            Column(modifier = Modifier.horizontalScroll(horizontalScroll)) {
+                Row {
+                    visibleDays.forEach { weekday ->
                         MatrixHeaderCell(
-                            text = slot.shortLabel,
-                            width = SLOT_COLUMN_WIDTH,
-                            height = SLOT_HEADER_HEIGHT,
+                            text = WEEKDAY_NAMES[weekday - 1],
+                            width = slotWidth * visibleSlots.size,
+                            height = dayHeaderHeight,
                             background = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
+                Row {
+                    visibleDays.forEach { _ ->
+                        visibleSlots.forEach { slot ->
+                            MatrixHeaderCell(
+                                text = slot.shortLabel,
+                                width = slotWidth,
+                                height = slotHeaderHeight,
+                                background = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
-            for (row in rows) {
-                RoomRow(
-                    roomCourses = row.courses,
-                    visibleDays = visibleDays,
-                    visibleSlots = visibleSlots,
-                    gridWidth = gridWidth,
-                    gridLine = gridLine,
-                    onCourseClick = onCourseClick
-                )
+        }
+
+        // ---- 行（LazyColumn：表头固定，行滚动） ----
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(rows, key = { it.label }) { row ->
+                Row(modifier = Modifier.height(rowHeight)) {
+                    Box(
+                        modifier = Modifier
+                            .width(roomColumnWidth)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .drawBehind {
+                                drawLine(
+                                    gridLine,
+                                    Offset(0f, size.height),
+                                    Offset(size.width, size.height),
+                                    strokeWidth = 0.5.dp.toPx()
+                                )
+                            }
+                            .padding(horizontal = 4.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = if (shortNames) shortRoomName(row.label, buildingName) else row.label,
+                            style = roomTextStyle,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .horizontalScroll(horizontalScroll)
+                    ) {
+                        RoomRow(
+                            roomCourses = row.courses,
+                            visibleDays = visibleDays,
+                            visibleSlots = visibleSlots,
+                            gridWidth = gridWidth,
+                            rowHeight = rowHeight,
+                            slotWidth = slotWidth,
+                            gridLine = gridLine,
+                            onCourseClick = onCourseClick
+                        )
+                    }
+                }
             }
         }
     }
@@ -214,15 +225,14 @@ private data class CoursePlacement(
     val span: Int
 )
 
-/**
- * 矩阵的一行：单 Box 背景 + drawBehind 网格线 + 只摆有课的卡片。
- */
 @Composable
 private fun RoomRow(
     roomCourses: List<Course>,
     visibleDays: List<Int>,
     visibleSlots: List<PeriodSlot>,
     gridWidth: Dp,
+    rowHeight: Dp,
+    slotWidth: Dp,
     gridLine: androidx.compose.ui.graphics.Color,
     onCourseClick: (Course) -> Unit
 ) {
@@ -246,11 +256,11 @@ private fun RoomRow(
     Box(
         modifier = Modifier
             .width(gridWidth)
-            .height(ROW_HEIGHT)
+            .height(rowHeight)
             .background(MaterialTheme.colorScheme.surface)
             .drawBehind {
                 val stroke = 0.5.dp.toPx()
-                val columnPx = SLOT_COLUMN_WIDTH.toPx()
+                val columnPx = slotWidth.toPx()
                 var x = columnPx
                 while (x < size.width - 0.5f) {
                     drawLine(gridLine, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
@@ -263,8 +273,8 @@ private fun RoomRow(
             val palette = coursePalette(placement.course.courseName)
             Box(
                 modifier = Modifier
-                    .offset(x = SLOT_COLUMN_WIDTH * placement.colIndex)
-                    .width(SLOT_COLUMN_WIDTH * placement.span.coerceAtLeast(1))
+                    .offset(x = slotWidth * placement.colIndex)
+                    .width(slotWidth * placement.span.coerceAtLeast(1))
                     .fillMaxHeight()
                     .padding(1.dp)
                     .zIndex(1f)
@@ -330,15 +340,11 @@ private fun MatrixHeaderCell(
             text = text,
             color = contentColor,
             style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
         )
     }
 }
 
 /** 教室名缺失时的占位。 */
 private const val UNNAMED_ROOM = "未标注教室"
-
-private val SLOT_COLUMN_WIDTH = 96.dp
-private val DAY_HEADER_HEIGHT = 30.dp
-private val SLOT_HEADER_HEIGHT = 22.dp
-private val ROW_HEIGHT = 54.dp

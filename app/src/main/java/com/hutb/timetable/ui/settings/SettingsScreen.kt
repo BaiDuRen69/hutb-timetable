@@ -46,6 +46,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -386,13 +387,31 @@ private fun TimetableEditor(
             .padding(start = 20.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        // 名称先写本地草稿，失焦/回车才提交，避免逐字符落盘
+        var nameText by remember(timetable.id) { mutableStateOf(timetable.name) }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         OutlinedTextField(
-            value = timetable.name,
-            onValueChange = onRename,
+            value = nameText,
+            onValueChange = { nameText = it },
             label = { Text("时间表名称") },
             singleLine = true,
             textStyle = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.fillMaxWidth()
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onDone = {
+                    keyboard?.hide()
+                    if (nameText != timetable.name) onRename(nameText)
+                }
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focus ->
+                    if (!focus.isFocused && nameText != timetable.name) {
+                        onRename(nameText)
+                    }
+                }
         )
         timetable.periods.forEachIndexed { index, period ->
             var startText by remember(timetable.id, index) { mutableStateOf(period.start) }

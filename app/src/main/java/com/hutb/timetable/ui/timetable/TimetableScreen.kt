@@ -98,9 +98,6 @@ fun TimetableScreen(
     // 教室模式下"只看空教室"的开关（纯展示层状态，不进 ViewModel）
     var emptyRoomsOnly by rememberSaveable { mutableStateOf(false) }
 
-    // 教室矩阵的纵向滚动由外部持有：头部工具栏与矩阵共用同一个滚动容器，下滑时自然滑出
-    val roomScroll = rememberScrollState()
-    LaunchedEffect(state.schedule.queryMode) { roomScroll.scrollTo(0) }
 
     // 筛选后的课程，用于统计命中数
     val visibleCourses = remember(state.schedule.data, state.schedule.filter) {
@@ -396,24 +393,19 @@ fun TimetableScreen(
             }
 
             if (showMatrix) {
-                // 头部工具栏与矩阵共用一个纵向滚动容器：下滑时头部逐步滑出
-                Column(
+                // 表头固定在顶部；矩阵内部用 LazyColumn 滚动（星期表头不随行滚走）
+                RoomMatrix(
+                    courses = state.schedule.data.courses,
+                    filter = state.schedule.filter,
+                    onCourseClick = { selectedCourse = it },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .verticalScroll(roomScroll)
-                ) {
-                    RoomMatrix(
-                        courses = state.schedule.data.courses,
-                        filter = state.schedule.filter,
-                        onCourseClick = { selectedCourse = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        shortNames = state.shortRoomNames,
-                        buildingName = state.room.selectedBuilding,
-                        sortMode = state.roomSortMode,
-                        allRooms = allRoomsForMatrix
-                    )
-                }
+                        .weight(1f),
+                    shortNames = state.shortRoomNames,
+                    buildingName = state.room.selectedBuilding,
+                    sortMode = state.roomSortMode,
+                    allRooms = allRoomsForMatrix
+                )
             } else {
                 Box(modifier = Modifier.fillMaxSize()) {
                     when {
