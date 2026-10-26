@@ -99,6 +99,7 @@ fun SettingsScreen(
     var expandedId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWeekPicker by rememberSaveable { mutableStateOf(false) }
     var showClearConfirm by rememberSaveable { mutableStateOf(false) }
+    var showSponsor by rememberSaveable { mutableStateOf(false) }
 
     val active = timetables.firstOrNull { it.id == activeId }
     val currentWeek = if (startDate.isBlank()) null else computeCurrentWeek(startDate, LocalDate.now())
@@ -228,6 +229,11 @@ fun SettingsScreen(
             }
         }
 
+        // ---- 支持作者 ----
+        SectionCard(title = "支持作者") {
+            SponsorEntry(onClick = { showSponsor = true })
+        }
+
         // ---- 作息时间表 ----
         SectionCard(title = "作息时间表") {
             Text(
@@ -338,6 +344,10 @@ fun SettingsScreen(
                 TextButton(onClick = { showClearConfirm = false }) { Text("取消") }
             }
         )
+    }
+
+    if (showSponsor) {
+        SponsorDialog(onDismiss = { showSponsor = false })
     }
 
     if (showWeekPicker) {
