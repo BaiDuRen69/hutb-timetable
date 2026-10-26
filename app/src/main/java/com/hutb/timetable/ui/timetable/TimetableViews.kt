@@ -84,7 +84,9 @@ internal fun EmptyRoomsView(
     shortNames: Boolean,
     buildingName: String?,
     modifier: Modifier = Modifier,
-    onRoomClick: (String) -> Unit = {}
+    onRoomClick: (String) -> Unit = {},
+    /** 有筛选时提供一键清除；清除后通常回到整楼矩阵 */
+    onClearFilter: (() -> Unit)? = null
 ) {
     if (rooms.isEmpty()) {
         EmptyView(
@@ -98,11 +100,22 @@ internal fun EmptyRoomsView(
             .verticalScroll(rememberScrollState())
             .padding(12.dp)
     ) {
-        Text(
-            text = "以下教室在当前筛选范围内没有课",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "以下教室在当前筛选范围内没有课",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (onClearFilter != null) {
+                TextButton(onClick = onClearFilter) {
+                    Text("清除筛选", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),

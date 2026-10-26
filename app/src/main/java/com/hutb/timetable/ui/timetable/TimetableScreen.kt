@@ -46,6 +46,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -234,6 +235,12 @@ fun TimetableScreen(
         ) {
             onFilterChange(nowTarget.filter)
         }
+    }
+    // 一键退出"现在空教室"：清掉节次筛选与只看空教室，回到整楼矩阵
+    val clearNowFilter: () -> Unit = {
+        nowEmptyMode = false
+        emptyRoomsOnly = false
+        onFilterChange(ScheduleFilter())
     }
 
     // 教室条件：校区 · 教学楼 · 教室（README 承诺的三级信息）
@@ -514,6 +521,8 @@ fun TimetableScreen(
                 NowEmptyRoomsBar(
                     label = target.label,
                     subtitle = target.subtitle,
+                    active = nowEmptyMode,
+                    onClear = clearNowFilter,
                     onClick = {
                         nowEmptyMode = true
                         emptyRoomsOnly = true
@@ -656,6 +665,11 @@ fun TimetableScreen(
                                     nowEmptyMode = false
                                     onSelectRoom(room)
                                 },
+                                onClearFilter = if (state.schedule.filter.isActive) {
+                                    clearNowFilter
+                                } else {
+                                    null
+                                },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -782,6 +796,8 @@ private fun rememberNowEmptyTarget(
 private fun NowEmptyRoomsBar(
     label: String,
     subtitle: String,
+    active: Boolean,
+    onClear: () -> Unit,
     onClick: () -> Unit
 ) {
     val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -817,12 +833,23 @@ private fun NowEmptyRoomsBar(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Text(
-            text = "查看",
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = contentColor
-        )
+        if (active) {
+            TextButton(onClick = onClear) {
+                Text(
+                    text = "清除筛选",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = contentColor
+                )
+            }
+        } else {
+            Text(
+                text = "查看",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor
+            )
+        }
     }
 }
 
