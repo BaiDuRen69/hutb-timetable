@@ -164,6 +164,11 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_FIRST_LOGIN_COMPLETED, false)
         set(value) = prefs.edit().putBoolean(KEY_FIRST_LOGIN_COMPLETED, value).apply()
 
+    /** 是否已确认首次启动的“课表仅供参考”使用须知。 */
+    var disclaimerAcknowledged: Boolean
+        get() = prefs.getBoolean(KEY_DISCLAIMER_ACKNOWLEDGED, false)
+        set(value) = prefs.edit().putBoolean(KEY_DISCLAIMER_ACKNOWLEDGED, value).apply()
+
     private fun keyStart(semesterId: String): String = "$KEY_SEMESTER_START_PREFIX$semesterId"
 
     fun newTimetableId(): String =
@@ -217,5 +222,6 @@ class AppSettings(context: Context) {
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_STYLE = "theme_style"
         private const val KEY_FIRST_LOGIN_COMPLETED = "first_login_completed"
+        private const val KEY_DISCLAIMER_ACKNOWLEDGED = "disclaimer_acknowledged"
     }
 }

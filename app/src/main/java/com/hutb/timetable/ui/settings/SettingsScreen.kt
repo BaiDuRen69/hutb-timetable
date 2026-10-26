@@ -59,6 +59,7 @@ import com.hutb.timetable.core.semesterStartForWeek
 import com.hutb.timetable.data.local.AppSettings
 import com.hutb.timetable.data.local.ClassTimetable
 import com.hutb.timetable.data.local.PeriodTime
+import com.hutb.timetable.ui.DISCLAIMER_BODY
 import com.hutb.timetable.ui.theme.ThemeMode
 import com.hutb.timetable.ui.theme.ThemeStyle
 import java.time.LocalDate
@@ -239,6 +240,22 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "课表数据来自学校教务系统，本应用仅作只读查询，与学校无隶属关系。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // ---- 免责声明 ----
+        SectionCard(title = "免责声明") {
+            Text(
+                text = "课表仅供参考",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = DISCLAIMER_BODY,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

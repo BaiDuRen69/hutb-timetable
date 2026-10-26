@@ -236,7 +236,8 @@ fun LoginScreen(
             // ---- 底部说明 ----
             Text(
                 text = "账号密码直接在教务系统页面输入，App 不保存密码；\n" +
-                    "登录后课表数据会缓存在本机，断网也能查看最近一次结果。",
+                    "登录后课表数据会缓存在本机，断网也能查看最近一次结果。\n" +
+                    "课表仅供参考，请以教务系统及学校通知为准。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

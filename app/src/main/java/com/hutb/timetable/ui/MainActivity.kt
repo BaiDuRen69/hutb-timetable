@@ -107,6 +107,11 @@ class MainActivity : ComponentActivity() {
                 // rememberSaveable：屏幕旋转后覆盖层不凭空消失。
                 var showLogin by rememberSaveable { mutableStateOf(!container.repository.hasStoredSession()) }
 
+                // 首次启动明确告知课表仅供参考；确认过就不再打扰
+                var showDisclaimer by rememberSaveable {
+                    mutableStateOf(!container.settings.disclaimerAcknowledged)
+                }
+
                 // 设置页开关
                 var showSettings by rememberSaveable { mutableStateOf(false) }
 
@@ -329,6 +334,15 @@ class MainActivity : ComponentActivity() {
                                 showLogin = true
                             },
                             secureStorage = container.credentials.secureStorage
+                        )
+                    }
+
+                    if (showDisclaimer) {
+                        DisclaimerDialog(
+                            onConfirm = {
+                                container.settings.disclaimerAcknowledged = true
+                                showDisclaimer = false
+                            }
                         )
                     }
                 }
