@@ -79,6 +79,12 @@ release 包使用独立签名，和 debug 包不能覆盖安装；从 debug 换�
 
 测试类自动发现，新增 `*Test.kt` 无需修改构建脚本（细节见 `docs/development.md`）。
 
+```bash
+# 需要已连接设备或模拟器；MIUI 真机可能拦截测试 Activity，建议优先用模拟器
+./gradlew :app:connectedDebugAndroidTest --console=plain
+# → 8 个 Compose/仪器测试：教室列表、连堂分割、免责声明、会话过期缓存、分享/ICS
+```
+
 ## 隐私与合规
 
 * 密码在**统一认证页面（WebView）内输入**：App 进程内完成渲染但不存储、不上传密码，

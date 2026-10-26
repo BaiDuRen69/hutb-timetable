@@ -606,7 +606,9 @@ fun TimetableScreen(
                             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                         }
 
-                        state.session.expired -> {
+                        // 会话失效但仍有缓存时继续显示课表，由顶部横幅提示重新登录；
+                        // 只有连缓存都没有才用整屏空态，避免把可看的离线课表盖住
+                        state.session.expired && state.schedule.data == null -> {
                             SessionExpiredView(
                                 onLogin = onLogin,
                                 modifier = Modifier.align(Alignment.Center)
