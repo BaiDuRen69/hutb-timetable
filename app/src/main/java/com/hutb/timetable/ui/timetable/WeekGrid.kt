@@ -142,7 +142,7 @@ fun WeekGrid(
     val fontScale = density.fontScale.coerceIn(1f, 1.6f)
     val headerHeight = (44 * minOf(fontScale, 1.4f)).dp
     val periodHeight = (64 * fontScale).dp
-    val dayColumnWidth = 116.dp
+    val dayColumnWidth = (116 * minOf(fontScale, 1.4f)).dp
     val periodColumnWidth = (78 * minOf(fontScale, 1.4f)).dp
     val gridWidth = dayColumnWidth * visibleDays.size
     val gridWidthPx = with(density) { gridWidth.toPx() }

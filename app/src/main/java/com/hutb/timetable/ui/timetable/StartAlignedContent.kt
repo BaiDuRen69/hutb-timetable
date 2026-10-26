@@ -20,6 +20,9 @@ internal fun StartAlignedContent(
     content: @Composable () -> Unit
 ) {
     Layout(content = content, modifier = modifier) { measurables, constraints ->
+        require(measurables.size == 1) {
+            "StartAlignedContent 只接受一个子项，当前为 ${measurables.size} 个"
+        }
         val placeable = measurables.first().measure(
             constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity)
         )

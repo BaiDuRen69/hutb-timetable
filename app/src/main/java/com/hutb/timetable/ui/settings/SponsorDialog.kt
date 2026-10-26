@@ -1,10 +1,9 @@
 package com.hutb.timetable.ui.settings
 
-import android.Manifest
 import android.content.ContentValues
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -59,12 +58,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.core.content.ContextCompat
 import com.hutb.timetable.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -165,6 +162,12 @@ private fun SupportChannelDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "自愿支持，与学校/教务系统无关，不影响任何功能。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Spacer(modifier = Modifier.height(18.dp))
                 SponsorOptionRow(SponsorChannel.ALIPAY, onSelect)
                 Spacer(modifier = Modifier.height(10.dp))
@@ -243,19 +246,21 @@ private fun RewardQrDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val save = {
+    val saveToGallery = {
         scope.launch {
             val message = saveQrToGallery(context, channel.qrRes, channel.title)
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            save()
-        } else {
-            Toast.makeText(context, "未获得存储权限，无法保存图片", Toast.LENGTH_LONG).show()
+    // Android 9 及以下用系统文件选择器保存，不申请存储权限
+    val saveUsingDocument = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("image/png")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val message = saveQrToUri(context, channel.qrRes, uri)
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -301,7 +306,7 @@ private fun RewardQrDialog(
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "扫描二维码支持作者，或点击下方按钮保存到相册",
+                    text = "扫描二维码支持作者，或点击下方按钮保存收款码",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -310,20 +315,21 @@ private fun RewardQrDialog(
                 Spacer(modifier = Modifier.height(14.dp))
                 Button(
                     onClick = {
-                        val needsPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-                            ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.WRITE_EXTERNAL_STORAGE
-                            ) != PackageManager.PERMISSION_GRANTED
-                        if (needsPermission) {
-                            permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            saveToGallery()
                         } else {
-                            save()
+                            saveUsingDocument.launch(qrFileName(channel.title))
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("保存到相册")
+                    Text(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            "保存到相册"
+                        } else {
+                            "保存图片"
+                        }
+                    )
                 }
                 TextButton(
                     onClick = onDismiss,
@@ -336,7 +342,11 @@ private fun RewardQrDialog(
     }
 }
 
-/** 把收款码写入相册；Android 9 及以下需已授予存储权限。 */
+private fun qrFileName(channelName: String): String =
+    "课表查询打赏_${channelName}_" +
+        SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".png"
+
+/** Android 10+ 直接写入相册，不需要存储权限。 */
 private suspend fun saveQrToGallery(
     context: Context,
     @DrawableRes qrRes: Int,
@@ -345,24 +355,15 @@ private suspend fun saveQrToGallery(
     try {
         val bitmap = BitmapFactory.decodeResource(context.resources, qrRes)
             ?: return@withContext "保存失败：无法读取收款码图片"
-        val fileName = "课表查询打赏_${channelName}_" +
-            SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date()) + ".png"
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-        }
         val resolver = context.contentResolver
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.put(
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, qrFileName(channelName))
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(
                 MediaStore.Images.Media.RELATIVE_PATH,
                 Environment.DIRECTORY_PICTURES + "/课表查询"
             )
-        } else {
-            val dir = File(Environment.getExternalStorageDirectory(), "Pictures/课表查询")
-            if (!dir.exists() && !dir.mkdirs()) {
-                return@withContext "保存失败：无法创建目录"
-            }
-            values.put(MediaStore.Images.Media.DATA, File(dir, fileName).absolutePath)
+            put(MediaStore.Images.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             ?: return@withContext "保存失败：相册不可用"
@@ -371,7 +372,33 @@ private suspend fun saveQrToGallery(
                 return@withContext "保存失败：图片写入失败"
             }
         } ?: return@withContext "保存失败：无法写入相册"
+        resolver.update(
+            uri,
+            ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+            null,
+            null
+        )
         "已保存到相册：Pictures/课表查询"
+    } catch (e: Exception) {
+        "保存失败：${e.message ?: "未知错误"}"
+    }
+}
+
+/** Android 9 及以下通过 SAF 写到用户选择的位置。 */
+private suspend fun saveQrToUri(
+    context: Context,
+    @DrawableRes qrRes: Int,
+    uri: Uri
+): String = withContext(Dispatchers.IO) {
+    try {
+        val bitmap = BitmapFactory.decodeResource(context.resources, qrRes)
+            ?: return@withContext "保存失败：无法读取收款码图片"
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)) {
+                return@withContext "保存失败：图片写入失败"
+            }
+        } ?: return@withContext "保存失败：无法写入文件"
+        "已保存收款码"
     } catch (e: Exception) {
         "保存失败：${e.message ?: "未知错误"}"
     }

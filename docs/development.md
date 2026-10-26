@@ -79,7 +79,7 @@ tasks.register('unitTest', JavaExec) {
 运行方式：
 
 ```bash
-gradle :core:unitTest --console=plain
+./gradlew :core:unitTest --console=plain
 # 输出：JUnit version 4.13.2 / OK (107 tests)
 ```
 
@@ -108,7 +108,7 @@ gradle :core:unitTest --console=plain
 # Git Bash
 export JAVA_HOME="C:\Users\bai\.workbuddy\binaries\java\jdk-21.0.12.1+1"
 export ANDROID_HOME="C:\Users\bai\AppData\Local\Android\Sdk"
-gradle :app:assembleDebug --console=plain
+./gradlew :app:assembleDebug --console=plain
 ```
 
 产物：`app/build/outputs/apk/debug/app-debug.apk`
@@ -118,7 +118,7 @@ gradle :app:assembleDebug --console=plain
 ### 3.2.1 跑单元测试
 
 ```bash
-gradle :core:unitTest --console=plain
+./gradlew :core:unitTest --console=plain
 # → JUnit version 4.13.2 / OK (107 tests)
 ```
 

@@ -1,5 +1,8 @@
 package com.hutb.timetable.ui.theme
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
@@ -10,14 +13,17 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 
 /**
  * 当前是否深色主题。
@@ -277,8 +283,7 @@ enum class ThemeStyle(
 
 /**
  * 应用主题：深浅模式 + 配色均由用户选择。
- */
-@Composable
+ */@Composable
 fun HutbTimetableTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     themeStyle: ThemeStyle = ThemeStyle.BLUE,
@@ -292,6 +297,17 @@ fun HutbTimetableTheme(
     val colorScheme = remember(themeStyle, darkTheme) {
         if (darkTheme) themeStyle.darkScheme() else themeStyle.lightScheme()
     }
+    // 强制深浅色变化时系统栏图标要同步，否则浅色系统栏图标会落在深色 App 背景上看不见
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = view.context.findActivity()?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
     CompositionLocalProvider(LocalIsDarkTheme provides darkTheme) {
         MaterialTheme(
             colorScheme = colorScheme,
@@ -300,4 +316,11 @@ fun HutbTimetableTheme(
             content = content
         )
     }
+}
+
+/** Compose 的 Context 可能被主题/布局包装过，向上找到 Activity 的 Window。 */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

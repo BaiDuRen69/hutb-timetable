@@ -1,7 +1,10 @@
 package com.hutb.timetable.ui.timetable
 
+import android.content.Context
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
@@ -42,10 +46,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -55,6 +60,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.hutb.timetable.core.Course
 import com.hutb.timetable.core.RoomSortMode
@@ -183,6 +189,8 @@ fun RoomMatrix(
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    // 用表头右侧网格 Box 的宽度（不含教室名列）计算横向最大偏移
+                    .onSizeChanged { viewportWidthPx = it.width }
                     .scrollable(
                         state = horizontalState,
                         orientation = Orientation.Horizontal,
@@ -227,9 +235,7 @@ fun RoomMatrix(
 
         // ---- 行（LazyColumn：表头固定，行滚动；横向手势挂在每行网格上） ----
         Box(
-            modifier = Modifier
-                .weight(1f)
-                .onSizeChanged { viewportWidthPx = it.width }
+            modifier = Modifier.weight(1f)
         ) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(rows, key = { it.label }) { row ->
@@ -303,7 +309,8 @@ private data class CanvasCourse(
     val background: Color,
     val accent: Color,
     val nameLayout: TextLayoutResult,
-    val teacherLayout: TextLayoutResult?
+    val teacherLayout: TextLayoutResult?,
+    val accessibilityLabel: String
 )
 
 /** 一行矩阵的绘制参数（全部为像素，避免绘制时反复换算 dp）。 */
@@ -382,6 +389,17 @@ private fun rememberRoomCanvasData(
                     constraints = Constraints(maxWidth = textWidth)
                 )
             }
+            val periodText = if (course.startPeriod == course.endPeriod) {
+                "第${course.startPeriod}节"
+            } else {
+                "第${course.startPeriod}-${course.endPeriod}节"
+            }
+            val accessibilityLabel = listOf(
+                WEEKDAY_NAMES.getOrNull(course.weekday - 1).orEmpty() + periodText,
+                course.courseName,
+                course.classroom,
+                course.teacher
+            ).filter { it.isNotBlank() }.joinToString(" ")
             CanvasCourse(
                 course = course,
                 leftPx = (dayIndex * visibleSlots.size + firstIdx) * slotWidthPx + insetPx,
@@ -389,7 +407,8 @@ private fun rememberRoomCanvasData(
                 background = palette.background,
                 accent = palette.accent,
                 nameLayout = nameLayout,
-                teacherLayout = teacherLayout
+                teacherLayout = teacherLayout,
+                accessibilityLabel = accessibilityLabel
             )
         }
         RoomCanvasData(
@@ -414,6 +433,7 @@ private fun rememberRoomCanvasData(
  * 旧实现每门课都是一组 Compose 节点，纵向滚动时不断组合/布局 Text；
  * 这里每行只保留一个绘制节点，滚动时只做画布绘制，明显更轻。
  * 点击命中通过偏移量反算 Grid 坐标，仍然可以打开课程详情。
+ * 开启 TalkBack 时，在可见课程卡上叠加透明语义/点击节点，保证逐张卡可聚焦。
  */
 @Composable
 private fun RoomGridCanvas(
@@ -422,97 +442,118 @@ private fun RoomGridCanvas(
     onCourseClick: (Course) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val heading = remember(data.courses) {
-        data.courses.joinToString("，") { it.course.courseName }
+    val context = LocalContext.current
+    val accessibilityEnabled = remember(context) {
+        (context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager)
+            ?.isTouchExplorationEnabled == true
     }
-    val courseActions = remember(data.courses) {
-        data.courses.map { card ->
-            CustomAccessibilityAction(card.course.courseName) {
-                onCourseClick(card.course)
-                true
-            }
-        }
-    }
-    val semanticsModifier = if (heading.isBlank()) {
-        Modifier
-    } else {
-        Modifier.semantics {
-            contentDescription = heading
-            customActions = courseActions
-        }
-    }
-    Canvas(
-        modifier = modifier
-            .then(semanticsModifier)
-            .pointerInput(data) {
-                detectTapGestures { position ->
-                    val x = position.x + horizontalOffset()
-                    data.courses
-                        .lastOrNull { x >= it.leftPx && x <= it.leftPx + it.widthPx }
-                        ?.let { onCourseClick(it.course) }
+    val density = LocalDensity.current
+    var viewportWidthPx by remember { mutableIntStateOf(0) }
+
+    Box(modifier = modifier.onSizeChanged { viewportWidthPx = it.width }) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    if (accessibilityEnabled) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(data) {
+                            detectTapGestures { position ->
+                                val x = position.x + horizontalOffset()
+                                data.courses
+                                    .lastOrNull { x >= it.leftPx && x <= it.leftPx + it.widthPx }
+                                    ?.let { onCourseClick(it.course) }
+                            }
+                        }
+                    }
+                )
+        ) {
+            val offsetPx = horizontalOffset()
+            drawRect(data.surface)
+
+            val stroke = 0.5.dp.toPx()
+            val firstCol = floor(offsetPx / data.slotWidthPx).toInt().coerceAtLeast(0)
+            val lastCol = ceil((offsetPx + size.width) / data.slotWidthPx).toInt()
+                .coerceAtMost(data.columnCount)
+            for (col in firstCol..lastCol) {
+                if (col <= 0) continue
+                val x = col * data.slotWidthPx - offsetPx
+                if (x in 0f..size.width) {
+                    drawLine(data.gridLine, Offset(x, 0f), Offset(x, size.height), stroke)
                 }
             }
-    ) {
-        val offsetPx = horizontalOffset()
-        drawRect(data.surface)
-
-        val stroke = 0.5.dp.toPx()
-        val firstCol = floor(offsetPx / data.slotWidthPx).toInt().coerceAtLeast(0)
-        val lastCol = ceil((offsetPx + size.width) / data.slotWidthPx).toInt()
-            .coerceAtMost(data.columnCount)
-        for (col in firstCol..lastCol) {
-            if (col <= 0) continue
-            val x = col * data.slotWidthPx - offsetPx
-            if (x in 0f..size.width) {
-                drawLine(data.gridLine, Offset(x, 0f), Offset(x, size.height), stroke)
-            }
-        }
-        drawLine(
-            data.gridLine,
-            Offset(0f, size.height),
-            Offset(size.width, size.height),
-            stroke
-        )
-
-        val cardTop = data.insetPx
-        val cardHeight = data.rowHeightPx - data.insetPx * 2
-        val corner = CornerRadius(data.cornerPx)
-        data.courses.forEach { card ->
-            val left = card.leftPx - offsetPx
-            if (left + card.widthPx < 0f || left > size.width) return@forEach
-            drawRoundRect(
-                color = card.background,
-                topLeft = Offset(left, cardTop),
-                size = Size(card.widthPx, cardHeight),
-                cornerRadius = corner
+            drawLine(
+                data.gridLine,
+                Offset(0f, size.height),
+                Offset(size.width, size.height),
+                stroke
             )
-            val path = Path().apply {
-                addRoundRect(
-                    RoundRect(
-                        left = left,
-                        top = cardTop,
-                        right = left + card.widthPx,
-                        bottom = cardTop + cardHeight,
-                        cornerRadius = corner
-                    )
-                )
-            }
-            clipPath(path) {
-                drawRect(
-                    color = card.accent,
+
+            val cardTop = data.insetPx
+            val cardHeight = data.rowHeightPx - data.insetPx * 2
+            val corner = CornerRadius(data.cornerPx)
+            data.courses.forEach { card ->
+                val left = card.leftPx - offsetPx
+                if (left + card.widthPx < 0f || left > size.width) return@forEach
+                drawRoundRect(
+                    color = card.background,
                     topLeft = Offset(left, cardTop),
-                    size = Size(data.accentWidthPx, cardHeight)
+                    size = Size(card.widthPx, cardHeight),
+                    cornerRadius = corner
                 )
-                val textX = left + data.accentWidthPx + data.textPadPx
-                val nameTop = cardTop + data.verticalPadPx
-                drawText(card.nameLayout, topLeft = Offset(textX, nameTop))
-                card.teacherLayout?.let { teacher ->
-                    drawText(
-                        teacher,
-                        topLeft = Offset(textX, nameTop + card.nameLayout.size.height)
+                val path = Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            left = left,
+                            top = cardTop,
+                            right = left + card.widthPx,
+                            bottom = cardTop + cardHeight,
+                            cornerRadius = corner
+                        )
                     )
                 }
+                clipPath(path) {
+                    drawRect(
+                        color = card.accent,
+                        topLeft = Offset(left, cardTop),
+                        size = Size(data.accentWidthPx, cardHeight)
+                    )
+                    val textX = left + data.accentWidthPx + data.textPadPx
+                    val nameTop = cardTop + data.verticalPadPx
+                    drawText(card.nameLayout, topLeft = Offset(textX, nameTop))
+                    card.teacherLayout?.let { teacher ->
+                        drawText(
+                            teacher,
+                            topLeft = Offset(textX, nameTop + card.nameLayout.size.height)
+                        )
+                    }
+                }
             }
+        }
+
+        if (accessibilityEnabled) {
+            val offsetPx = horizontalOffset()
+            data.courses
+                .filter {
+                    it.leftPx + it.widthPx > offsetPx &&
+                        it.leftPx < offsetPx + viewportWidthPx
+                }
+                .forEach { card ->
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                IntOffset((card.leftPx - horizontalOffset()).roundToInt(), 0)
+                            }
+                            .width(with(density) { card.widthPx.toDp() })
+                            .fillMaxHeight()
+                            .semantics {
+                                contentDescription = card.accessibilityLabel
+                                role = Role.Button
+                            }
+                            .clickable { onCourseClick(card.course) }
+                    )
+                }
         }
     }
 }

@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.hutb.timetable.BuildConfig
 import com.hutb.timetable.core.computeCurrentWeek
 import com.hutb.timetable.core.semesterStartForWeek
 import com.hutb.timetable.data.local.AppSettings
@@ -140,7 +141,7 @@ fun SettingsScreen(
         }
 
         // ---- 当前周次（按学期） ----
-        SectionCard(title = "当前周次（当前学期）") {
+        SectionCard(title = "当前学期周次") {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -153,7 +154,7 @@ fun SettingsScreen(
                         text = when {
                             !canEditStartDate -> "请先登录并选择学期"
                             startDate.isBlank() -> "未设置（点击选择）"
-                            currentWeek != null -> "今天是开学第 $currentWeek 周"
+                            currentWeek != null -> "该学期第 $currentWeek 周（按今天反推）"
                             else -> "周次记录异常，请重新选择"
                         },
                         style = MaterialTheme.typography.bodyMedium
@@ -227,6 +228,20 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        // ---- 关于 ----
+        SectionCard(title = "关于") {
+            Text(
+                text = "课表查询 v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "课表数据来自学校教务系统，本应用仅作只读查询，与学校无隶属关系。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         // ---- 支持作者 ----
@@ -355,7 +370,7 @@ fun SettingsScreen(
         var selectedWeek by remember { mutableStateOf(currentWeek ?: 1) }
         AlertDialog(
             onDismissRequest = { showWeekPicker = false },
-            title = { Text("今天是开学第几周？") },
+            title = { Text("该学期第几周？（按今天反推）") },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(

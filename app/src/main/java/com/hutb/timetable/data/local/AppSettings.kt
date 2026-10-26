@@ -87,9 +87,9 @@ data class ClassTimetable(
 }
 
 /**
- * 应用设置：开学日期（用于推算当前周次）+ 作息时间表集合。
+ * 应用设置：按学期保存的开学日期（用于推算周次）+ 作息时间表集合 + 主题。
  *
- * 时间表以 JSON 数组整体落盘；开学日期为 "yyyy-MM-dd"，
+ * 时间表以 JSON 数组整体落盘；开学日期按学期存为 "yyyy-MM-dd"，
  * 未设置时周次沿用上次手动选择的值。
  */
 class AppSettings(context: Context) {

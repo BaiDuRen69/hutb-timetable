@@ -136,15 +136,33 @@ class TimetableViewModel(
             repository.restoreSession()
             _uiState.update { it.copy(session = it.session.copy(loggedIn = true)) }
             viewModelScope.launch {
-                // 身份未知（升级/首次登录未解析）时先解析学号：
-                // 课表缓存按账号分区，未知身份不能读写任何账号的缓存
-                ensureIdentity()
-                // 学期列表有持久缓存时先直接进课表，学期列表随后在后台刷新
+                // 先把学期/课表缓存上屏，身份解析放到后面，避免网络慢时一直空白。
+                // 缓存读取会回退到 lastAccountKey（新登录时会先清空，不会串号）。
                 val cached = repository.readSemestersCache()
                 if (currentSemesterOrDefault(cached) != null) {
                     applySemesters(cached)
                     loadSchedule()
                 }
+                // 身份未知（升级/首次登录未解析）时解析学号；
+                // 失败时如果能读到缓存，继续展示缓存，但本次不写新缓存。
+                val hadIdentity = repository.studentId.isNotBlank()
+                val resolved = ensureIdentity()
+                if (resolved && !hadIdentity) {
+                    // 刚才的查询没有账号分区可写缓存，身份回来后重查一次补写
+                    loadSchedule()
+                }
+                if (!resolved && repository.studentId.isBlank() &&
+                    !_uiState.value.session.expired
+                ) {
+                    _uiState.update {
+                        it.copy(
+                            session = it.session.copy(
+                                errorMessage = "未识别账号，本次不写入缓存"
+                            )
+                        )
+                    }
+                }
+                // 学期列表随后在后台刷新
                 loadSemesters()
             }
         } else {
@@ -934,8 +952,13 @@ class TimetableViewModel(
         _uiState.update { it.copy(session = it.session.copy(errorMessage = null)) }
     }
 
-    /** 退出登录（保留本地课表缓存，退出后仍可离线查看）。 */
-    fun logout() {
+    /**
+     * 退出登录。
+     *
+     * @param clearOffline true 时同时清除本地离线课表（共享设备场景），
+     *                     false 时保留上次账号的离线课表供未登录查看
+     */
+    fun logout(clearOffline: Boolean = false) {
         scheduleJob?.cancel()
         repository.cancelRoomQueries()
         repository.logout()
@@ -944,8 +967,17 @@ class TimetableViewModel(
             roomSortMode = repository.roomSortMode,
             timetable = settings.activeTimetable
         )
-        // 退出后立即切到上次账号的离线课表，用户关掉登录提示即可查看
-        viewModelScope.launch { loadOfflinePersonal() }
+        viewModelScope.launch {
+            if (clearOffline) {
+                repository.clearLocalData()
+                _uiState.update {
+                    it.copy(schedule = it.schedule.copy(data = null, fromCache = false))
+                }
+            } else {
+                // 退出后立即切到上次账号的离线课表，用户关掉登录提示即可查看
+                loadOfflinePersonal()
+            }
+        }
     }
 
     override fun onCleared() {

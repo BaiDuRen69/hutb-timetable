@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -20,7 +21,9 @@ import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import com.hutb.timetable.BuildConfig
 import com.hutb.timetable.HutbApp
 import com.hutb.timetable.R
 
@@ -69,12 +72,20 @@ class WebLoginActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 登录页可能显示账号密码/验证码，禁止截图和最近任务预览
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_web_login)
 
         rootLayout = findViewById(R.id.rootLayout)
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
         statusText = findViewById(R.id.statusText)
+
+        // 登录页固定浅色配色：状态栏/导航栏使用深色图标，不跟随 App 的强制深色主题
+        WindowCompat.getInsetsController(window, rootLayout).apply {
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
+        }
 
         findViewById<Button>(R.id.btnCancel).setOnClickListener {
             setResult(RESULT_CANCELED)
@@ -180,7 +191,10 @@ class WebLoginActivity : ComponentActivity() {
      * 只放行学校域名；回到教务系统域时才尝试判定登录。
      */
     private fun handleUrl(target: String): Boolean {
-        Log.d(TAG, "navigate: $target")
+        // CAS 跳转 URL 可能带 ticket/service，release 包不能把完整地址写进日志
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "navigate: ${safeUrlForLog(target)}")
+        }
         // 域名白名单：登录流程只应涉及 cas / jwgl，其余一律拦截
         if (!isAllowedHost(target)) {
             Log.w(TAG, "拦截非学校跳转: ${safeUrlForLog(target)}")

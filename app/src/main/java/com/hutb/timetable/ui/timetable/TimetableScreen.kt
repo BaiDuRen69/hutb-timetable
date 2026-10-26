@@ -152,8 +152,8 @@ fun TimetableScreen(
         emptyRoomsOnly &&
         state.room.selectedRoomCode == null
 
-    // 教室矩阵可见时，头部工具栏与矩阵放进同一个滚动容器（头部随下滑自然隐藏）；
-    // 其余情况头部固定，内容区自行处理滚动。
+    // 教室矩阵可见时：顶部工具栏固定，矩阵内部自己滚动（表头固定 + LazyColumn 行列表）；
+    // 其余情况内容区自行处理滚动。
     // 注意：筛选后没有命中课程时仍显示矩阵（含全部教室行），只在顶部加一行提示，
     // 否则用户会以为加载失败或筛选条件失效。
     val showMatrix = state.schedule.queryMode == QueryMode.ROOM &&
@@ -390,7 +390,10 @@ fun TimetableScreen(
             if (state.session.expired && state.schedule.data != null) {
                 SessionExpiredBanner(onLogin = onLogin)
             } else if (!state.session.loggedIn && state.schedule.data != null) {
-                OfflineCacheBanner(onLogin = onLogin)
+                OfflineCacheBanner(
+                    week = state.schedule.data.week,
+                    onLogin = onLogin
+                )
             }
 
             if (showFilterSheet) {

@@ -200,15 +200,11 @@ class TimetableRepository(
     /**
      * 读取缓存时允许回退到"上次登录的账号分区"。
      *
-     * 只在本机没有活动会话（退出登录/首次离线进入）时生效：
-     * 有会话但学号还没解析出来时不能猜账号，否则可能读到别人的缓存。
+     * [AppPrefs.lastAccountKey] 在每次新登录时都会先清空、待解析出学号后再写入，
+     * 因此它要么属于当前会话，要么属于上一次成功登录的账号，不会串到第三个人。
      */
     private fun readAccountKey(): String? =
-        accountKey() ?: if (!credentials.hasSession) {
-            prefs.lastAccountKey.takeIf { it.isNotBlank() }
-        } else {
-            null
-        }
+        accountKey() ?: prefs.lastAccountKey.takeIf { it.isNotBlank() }
 
     private fun scoped(scope: String, forRead: Boolean = false): String? {
         val key = if (forRead) readAccountKey() else accountKey()

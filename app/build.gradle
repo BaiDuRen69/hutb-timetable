@@ -9,6 +9,8 @@ def hasReleaseSigning = keystorePropsFile.exists()
 def keystoreProps = new Properties()
 if (hasReleaseSigning) {
     keystorePropsFile.withInputStream { keystoreProps.load(it) }
+} else {
+    logger.warn('keystore.properties 缺失：release 将退回 debug 签名，仅限本机测试，不能对外分发')
 }
 
 android {
@@ -19,8 +21,8 @@ android {
         applicationId "com.hutb.timetable"
         minSdk 24
         targetSdk 36
-        versionCode 38
-        versionName "1.0.37"
+        versionCode 39
+        versionName "1.0.38"
     }
 
     signingConfigs {

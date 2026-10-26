@@ -164,7 +164,7 @@ class ScheduleCache(context: Context) : SQLiteOpenHelper(
         var total = 0L
         writableDatabase.query(
             TABLE_SCHEDULE,
-            arrayOf("rowid", "LENGTH(payload)"),
+            arrayOf("rowid", "LENGTH(CAST(payload AS BLOB))"),
             null, null, null, null,
             "cached_at DESC"
         ).use { cursor ->

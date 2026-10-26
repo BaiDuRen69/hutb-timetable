@@ -319,13 +319,13 @@ class MainActivity : ComponentActivity() {
                                 pendingRoomMode = false
                                 showLogin = false
                             },
-                            onLogout = {
+                            onLogout = { clearOffline ->
                                 // 登出同时清掉 WebView 的 CAS 会话：
                                 // 否则下次"切换账号"会被 SSO 直接送回原账号
                                 CookieManager.getInstance().removeAllCookies(null)
                                 CookieManager.getInstance().flush()
                                 pendingRoomMode = false
-                                vm.logout()
+                                vm.logout(clearOffline)
                                 showLogin = true
                             },
                             secureStorage = container.credentials.secureStorage

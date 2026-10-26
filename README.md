@@ -25,7 +25,9 @@
 | **记住校区 / 教学楼 / 教室选择** | ✅ | `AppPrefs.lastCampusId/…` + `TimetableViewModel.restoreRemembered*`（下次进教室模式自动恢复） |
 | **设置页：当前周次 + 主题 + 作息时间表** | ✅ | `AppSettings.kt` + `SettingsScreen.kt`（只需选“今天是开学第几周”，自动反推第一周周一并按学期保存；深浅模式 + 5 套主题配色；内置夏/冬时制 × 南/北校区四套作息，可改可加自定义） |
 | **登录与离线策略** | ✅ | 首次安装必须登录；之后启动未登录只提示、可查看上次登录账号的离线个人课表；教室课表必须登录后才能进入（未登录点“教室课表”会拉起登录） |
-| **支持作者** | ✅ | 设置页“请我喝杯咖啡”：支付宝 / 微信收款码，支持保存到相册（`SponsorDialog.kt`） |
+| **账号隐私** | ✅ | 退出登录可选“保留离线课表”或“清除并退出”；离线课表只读上次登录账号的哈希分区，登录页禁止截图（FLAG_SECURE） |
+| **支持作者** | ✅ | 设置页“请我喝杯咖啡”：支付宝 / 微信收款码，Android 10+ 保存到相册、旧版本走系统文件选择器，无需存储权限；收款码已降采样 |
+| **可访问性** | ✅ | 教室矩阵在开启 TalkBack 时为可见课程卡叠加语义/点击节点，逐卡播报“周三第1-2节 课程 教室 教师” |
 | **页面过渡动画** | ✅ | 登录页/设置页覆盖层使用 `AnimatedVisibility` 淡入 + 滑动过渡 |
 | **教室矩阵粘性表头** | ✅ | `RoomMatrix` 固定星期/节次表头 + `LazyColumn` 行列表；每行网格/课程卡由单个 `Canvas` 绘制（文字布局缓存），表头与所有行共享横向偏移 + `graphicsLayer` 平移，纵向滚动时不再反复组合/测量大量 Text 节点 |
 | **连堂课合并大格子** | ✅ | `RoomMatrix` 起始格拉宽卡片横跨整个节次区间，不再是"课程卡 + 连堂续格" |
@@ -56,17 +58,18 @@
 # Git Bash
 export JAVA_HOME=<JDK 21 路径>
 export ANDROID_HOME=<Android SDK 路径>
-gradle :app:assembleDebug --console=plain
+./gradlew :app:assembleDebug --console=plain
 
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 根目录的 `课表查询-debug.apk` 是最新 debug 包的副本，方便直接拷到手机安装。
+release 包使用独立签名，和 debug 包不能覆盖安装；从 debug 换到 release 需要先卸载一次（会清空本地缓存和会话）。
 
 ## 测试
 
 ```bash
-gradle :core:unitTest --console=plain
+./gradlew :core:unitTest --console=plain
 # → JUnit version 4.13.2 / OK (107 tests)
 ```
 

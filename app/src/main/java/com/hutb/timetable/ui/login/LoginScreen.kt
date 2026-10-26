@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,6 +28,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -52,11 +57,12 @@ fun LoginScreen(
     loggedIn: Boolean,
     onLogin: () -> Unit,
     onBack: () -> Unit,
-    onLogout: () -> Unit,
+    onLogout: (clearOffline: Boolean) -> Unit,
     /** 凭据是否加密落盘；false 时明确提示用户明文保存风险 */
     secureStorage: Boolean = true
 ) {
     BackHandler(enabled = canBack) { onBack() }
+    var showLogoutConfirm by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -208,7 +214,7 @@ fun LoginScreen(
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        TextButton(onClick = onLogout) {
+                        TextButton(onClick = { showLogoutConfirm = true }) {
                             Text(
                                 "退出登录",
                                 style = MaterialTheme.typography.bodySmall,
@@ -240,5 +246,31 @@ fun LoginScreen(
                     .offset(y = (-24).dp)
             )
         }
+    }
+
+    if (showLogoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirm = false },
+            title = { Text("退出登录") },
+            text = {
+                Text("退出后，本机仍可查看上次登录账号的离线课表。共享设备建议清除离线数据。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutConfirm = false
+                        onLogout(true)
+                    }
+                ) { Text("清除并退出") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutConfirm = false
+                        onLogout(false)
+                    }
+                ) { Text("保留离线课表") }
+            }
+        )
     }
 }
