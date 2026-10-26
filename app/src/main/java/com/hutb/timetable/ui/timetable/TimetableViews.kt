@@ -125,6 +125,28 @@ internal fun EmptyRoomsView(
     }
 }
 
+/** 未登录但本机有离线课表时的提示条：只提示，不阻断浏览。 */
+@Composable
+internal fun OfflineCacheBanner(onLogin: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "未登录，当前显示上次登录的离线课表",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = onLogin) {
+            Text("登录", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
 /** 数据仍在屏幕上时的会话失效提示条（不打断浏览）。 */
 @Composable
 internal fun SessionExpiredBanner(onLogin: () -> Unit, modifier: Modifier = Modifier) {

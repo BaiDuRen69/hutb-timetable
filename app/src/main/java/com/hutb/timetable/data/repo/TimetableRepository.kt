@@ -93,7 +93,7 @@ class TimetableRepository(
      * 别的周次有缓存时由 [readLatestCache] 单独返回，供 UI 提示"可跳转查看"。
      */
     suspend fun readCache(query: ScheduleQuery): WeekSchedule? = withContext(Dispatchers.IO) {
-        val scope = scoped(query.cacheScope) ?: return@withContext null
+        val scope = scoped(query.cacheScope, forRead = true) ?: return@withContext null
         cache.getSchedule(query.semesterId, query.week, scope)
             ?.takeIf { it.week == query.week }
             ?.toSchedule()
@@ -105,7 +105,7 @@ class TimetableRepository(
      * 仅用于"第 N 周有缓存，点此查看"的提示，调用方不得把它当当前周渲染。
      */
     suspend fun readLatestCache(query: ScheduleQuery): WeekSchedule? = withContext(Dispatchers.IO) {
-        val scope = scoped(query.cacheScope) ?: return@withContext null
+        val scope = scoped(query.cacheScope, forRead = true) ?: return@withContext null
         cache.getLatestOfSemester(query.semesterId, scope)?.toSchedule()
     }
 
@@ -125,7 +125,7 @@ class TimetableRepository(
      * 周次不匹配的缓存不上屏，避免显示错误周次的数据。
      */
     suspend fun readExactCache(query: ScheduleQuery): WeekSchedule? = withContext(Dispatchers.IO) {
-        val scope = scoped(query.cacheScope) ?: return@withContext null
+        val scope = scoped(query.cacheScope, forRead = true) ?: return@withContext null
         cache.getSchedule(query.semesterId, query.week, scope)
             ?.takeIf { it.week == query.week }
             ?.toSchedule()
@@ -197,7 +197,23 @@ class TimetableRepository(
     private fun accountKey(): String? =
         credentials.studentId.takeIf { it.isNotBlank() }?.let(::accountCacheKey)
 
-    private fun scoped(scope: String): String? = accountKey()?.let { "$scope|u=$it" }
+    /**
+     * 读取缓存时允许回退到"上次登录的账号分区"。
+     *
+     * 只在本机没有活动会话（退出登录/首次离线进入）时生效：
+     * 有会话但学号还没解析出来时不能猜账号，否则可能读到别人的缓存。
+     */
+    private fun readAccountKey(): String? =
+        accountKey() ?: if (!credentials.hasSession) {
+            prefs.lastAccountKey.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+
+    private fun scoped(scope: String, forRead: Boolean = false): String? {
+        val key = if (forRead) readAccountKey() else accountKey()
+        return key?.let { "$scope|u=$it" }
+    }
 
     private fun putCache(schedule: WeekSchedule, scope: String) {
         val scopedScope = scoped(scope) ?: return
@@ -251,14 +267,19 @@ class TimetableRepository(
             displayName = credentials.displayName
         )
         api.syncSessionFromCookie(session.jsessionId, session.serverId)
+        credentials.studentId.takeIf { it.isNotBlank() }?.let {
+            prefs.lastAccountKey = accountCacheKey(it)
+        }
         return session
     }
 
     /** 保存登录成功后拿到的会话。 */
     fun persistSession(session: AuthSession) {
-        // 新会话可能属于另一个账号：旧学号立即作废，等 resolveIdentity 回填；
-        // 解析不到时缓存读写会被跳过，绝不把新账号的数据记到旧账号分区。
+        // 新会话可能属于另一个账号：旧学号与旧离线分区立即作废，
+        // 等 resolveIdentity 回填；解析不到时缓存读写会被跳过，
+        // 绝不把新账号的数据记到旧账号分区，也不在退出后展示上一个账号的课表。
         credentials.studentId = ""
+        prefs.lastAccountKey = ""
         credentials.jsessionId = session.jsessionId
         credentials.serverId = session.serverId
         credentials.displayName = session.displayName
@@ -293,21 +314,25 @@ class TimetableRepository(
 
     /** 记录学号与显示名（登录后由用户名解析得到）。 */
     fun updateIdentity(studentId: String, displayName: String) {
-        if (studentId.isNotBlank()) credentials.studentId = studentId
+        if (studentId.isNotBlank()) {
+            credentials.studentId = studentId
+            // 只存哈希分区键，供退出登录后的离线只读缓存使用
+            prefs.lastAccountKey = accountCacheKey(studentId)
+        }
         if (displayName.isNotBlank()) credentials.displayName = displayName
     }
 
     /** 记录最近一次浏览的学期与周次。 */
     fun rememberPosition(semesterId: String, week: Int) {
-        val key = accountKey() ?: return
+        val key = readAccountKey() ?: return
         prefs.setLastSemesterIdFor(key, semesterId)
         prefs.setLastWeekFor(key, week)
     }
 
     val lastSemesterId: String
-        get() = accountKey()?.let { prefs.lastSemesterIdFor(it) }.orEmpty()
+        get() = readAccountKey()?.let { prefs.lastSemesterIdFor(it) }.orEmpty()
     val lastWeek: Int
-        get() = accountKey()?.let { prefs.lastWeekFor(it) } ?: 0
+        get() = readAccountKey()?.let { prefs.lastWeekFor(it) } ?: 0
     val studentId: String get() = credentials.studentId
 
     // ---------------- 教室查询的选择记忆 ----------------

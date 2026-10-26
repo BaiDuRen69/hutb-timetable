@@ -35,6 +35,7 @@ import com.hutb.timetable.data.remote.PageSnapshot
 import com.hutb.timetable.ui.login.LoginScreen
 import com.hutb.timetable.ui.login.WebLoginActivity
 import com.hutb.timetable.ui.settings.SettingsScreen
+import com.hutb.timetable.ui.timetable.QueryMode
 import com.hutb.timetable.ui.timetable.RoomPickerDialog
 import com.hutb.timetable.ui.timetable.SnapshotDialog
 import com.hutb.timetable.ui.timetable.TimetableScreen
@@ -125,13 +126,27 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 首次安装必须登录；登录过一次后，未登录只提示，离线课表仍可查看
+                val loginMandatory = !state.session.loggedIn &&
+                    !container.settings.firstLoginCompleted
+
+                // 未登录时点"教室课表"：登录成功后自动切到教室模式
+                var pendingRoomMode by rememberSaveable { mutableStateOf(false) }
+
                 val hasOverlay = showLogin || showSettings || showRoomPicker || showSnapshots
 
                 // 返回键分层：先关闭最上层覆盖层，主界面才是"再按一次退出"。
-                // 之前覆盖层没有统一拦截，返回键会直接把 Activity 结束掉。
+                // 首次强制登录时返回键直接退出，不能绕过登录进入主界面。
                 BackHandler(enabled = hasOverlay) {
                     when {
-                        showLogin -> showLogin = false
+                        showLogin -> {
+                            if (loginMandatory) {
+                                finish()
+                            } else {
+                                pendingRoomMode = false
+                                showLogin = false
+                            }
+                        }
                         showSettings -> showSettings = false
                         showRoomPicker -> showRoomPicker = false
                         showSnapshots -> showSnapshots = false
@@ -150,6 +165,20 @@ class MainActivity : ComponentActivity() {
                     if (state.session.loggedIn) showLogin = false
                 }
 
+                LaunchedEffect(
+                    pendingRoomMode,
+                    state.session.loggedIn,
+                    state.schedule.currentSemesterId
+                ) {
+                    if (pendingRoomMode &&
+                        state.session.loggedIn &&
+                        state.schedule.currentSemesterId.isNotBlank()
+                    ) {
+                        pendingRoomMode = false
+                        vm.switchQueryMode(QueryMode.ROOM)
+                    }
+                }
+
                 // 主界面常驻组合；登录页 / 设置页以覆盖层叠在其上，
                 // 返回时主界面不重组（整栋楼矩阵重组一次要几百毫秒，替换式显示每次返回都重建）
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -165,11 +194,24 @@ class MainActivity : ComponentActivity() {
                         },
                         // 已登录时点右上角账号按钮只是打开登录页（可返回），不直接登出
                         onLogout = { showLogin = true },
-                        onSwitchQueryMode = { vm.switchQueryMode(it) },
+                        onSwitchQueryMode = { mode ->
+                            if (mode == QueryMode.ROOM && !state.session.loggedIn) {
+                                // 教室课表要求登录；登录成功后自动切过去
+                                pendingRoomMode = true
+                                showLogin = true
+                            } else {
+                                vm.switchQueryMode(mode)
+                            }
+                        },
                         onPickRoom = {
-                            // 只准备草稿；对话框内的浏览不影响当前查询条件
-                            vm.beginRoomDraft()
-                            showRoomPicker = true
+                            if (!state.session.loggedIn) {
+                                pendingRoomMode = true
+                                showLogin = true
+                            } else {
+                                // 只准备草稿；对话框内的浏览不影响当前查询条件
+                                vm.beginRoomDraft()
+                                showRoomPicker = true
+                            }
                         },
                         onFilterChange = { vm.updateFilter(it) },
                         onSelectRoom = { vm.selectRoom(it) },
@@ -267,18 +309,22 @@ class MainActivity : ComponentActivity() {
                         LoginScreen(
                             loading = false,
                             errorMessage = state.session.errorMessage,
-                            // 登录页是覆盖层，任何情况下都可以返回课表（离线缓存仍可查看）
-                            canBack = true,
+                            // 首次安装必须登录；之后仅提示，关掉后仍可看离线课表
+                            canBack = !loginMandatory,
                             loggedIn = state.session.loggedIn,
                             onLogin = {
                                 loginLauncher.launch(WebLoginActivity.intent(this@MainActivity))
                             },
-                            onBack = { showLogin = false },
+                            onBack = {
+                                pendingRoomMode = false
+                                showLogin = false
+                            },
                             onLogout = {
                                 // 登出同时清掉 WebView 的 CAS 会话：
                                 // 否则下次"切换账号"会被 SSO 直接送回原账号
                                 CookieManager.getInstance().removeAllCookies(null)
                                 CookieManager.getInstance().flush()
+                                pendingRoomMode = false
                                 vm.logout()
                                 showLogin = true
                             },

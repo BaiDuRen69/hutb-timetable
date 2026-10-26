@@ -154,6 +154,16 @@ class AppSettings(context: Context) {
         get() = prefs.getString(KEY_THEME_STYLE, "blue") ?: "blue"
         set(value) = prefs.edit().putString(KEY_THEME_STYLE, value).apply()
 
+    /**
+     * 是否完成过首次登录。
+     *
+     * 首次安装必须登录；之后未登录只提示、不阻拦离线查看，
+     * 只有切到教室课表时才要求重新登录。
+     */
+    var firstLoginCompleted: Boolean
+        get() = prefs.getBoolean(KEY_FIRST_LOGIN_COMPLETED, false)
+        set(value) = prefs.edit().putBoolean(KEY_FIRST_LOGIN_COMPLETED, value).apply()
+
     private fun keyStart(semesterId: String): String = "$KEY_SEMESTER_START_PREFIX$semesterId"
 
     fun newTimetableId(): String =
@@ -206,5 +216,6 @@ class AppSettings(context: Context) {
         private const val KEY_SEMESTER_START_PREFIX = "semester_start_"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_THEME_STYLE = "theme_style"
+        private const val KEY_FIRST_LOGIN_COMPLETED = "first_login_completed"
     }
 }

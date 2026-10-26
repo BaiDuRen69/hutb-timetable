@@ -59,6 +59,16 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_LAST_SEMESTER_PATH, "") ?: ""
         set(value) = prefs.edit().putString(KEY_LAST_SEMESTER_PATH, value).apply()
 
+    /**
+     * 最近一次成功登录的账号分区键（哈希，不含学号明文）。
+     *
+     * 退出登录后仍保留：未登录时只读这个分区的离线课表；
+     * 下次登录会在解析出学号后覆盖，避免不同账号互相看到缓存。
+     */
+    var lastAccountKey: String
+        get() = prefs.getString(KEY_LAST_ACCOUNT_KEY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_LAST_ACCOUNT_KEY, value).apply()
+
     /** 上次学期（按账号隔离）。 */
     fun lastSemesterIdFor(accountKey: String): String =
         prefs.getString("last_semester_$accountKey", "") ?: ""
@@ -90,5 +100,6 @@ class AppPrefs(context: Context) {
         private const val KEY_SHORT_ROOM_NAMES = "short_room_names"
         private const val KEY_ROOM_SORT_MODE = "room_sort_mode"
         private const val KEY_LAST_SEMESTER_PATH = "last_semester_source_path"
+        private const val KEY_LAST_ACCOUNT_KEY = "last_account_key"
     }
 }

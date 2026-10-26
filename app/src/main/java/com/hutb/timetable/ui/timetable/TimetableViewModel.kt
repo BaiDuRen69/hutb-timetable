@@ -131,6 +131,8 @@ class TimetableViewModel(
     init {
         // 尝试用本地保存的会话直接进入
         if (repository.hasStoredSession()) {
+            // 只要登录过一次，后续启动不再强制登录（会话失效只提示）
+            settings.firstLoginCompleted = true
             repository.restoreSession()
             _uiState.update { it.copy(session = it.session.copy(loggedIn = true)) }
             viewModelScope.launch {
@@ -145,6 +147,44 @@ class TimetableViewModel(
                 }
                 loadSemesters()
             }
+        } else {
+            // 没有活动会话：只读上次登录账号的离线课表，不发起任何网络请求
+            viewModelScope.launch { loadOfflinePersonal() }
+        }
+    }
+
+    /**
+     * 未登录时加载上次登录账号的离线个人课表。
+     *
+     * 没有缓存就保持空态（由界面提示登录）；这里绝不发网络请求。
+     */
+    private suspend fun loadOfflinePersonal() {
+        if (repository.hasStoredSession()) return
+        val semesters = repository.readSemestersCache()
+        val current = currentSemesterOrDefault(semesters) ?: return
+        applySemesters(semesters)
+        val state = _uiState.value
+        val query = ScheduleQuery(
+            semesterId = state.schedule.currentSemesterId,
+            week = state.schedule.currentWeek
+        )
+        val exact = repository.readExactCache(query)
+        // 当前周没缓存时允许展示同分区最近一周，标题会显示实际周次，不能谎报为本周
+        val latest = if (exact == null) repository.readLatestCache(query) else null
+        val data = exact ?: latest
+        // 加载期间可能已经登录成功，此时不要用离线数据覆盖在线结果
+        if (repository.hasStoredSession()) return
+        _uiState.update {
+            it.copy(
+                schedule = it.schedule.copy(
+                    currentWeek = data?.week ?: it.schedule.currentWeek,
+                    data = data,
+                    fromCache = data != null,
+                    loading = false,
+                    staleCacheWeek = null
+                ),
+                session = it.session.copy(loggedIn = false, expired = false, errorMessage = null)
+            )
         }
     }
 
@@ -240,6 +280,8 @@ class TimetableViewModel(
 
     /** 登录成功后调用。 */
     fun onLoginSuccess(session: AuthSession) {
+        // 只要成功登录过一次，后续启动不再强制登录
+        settings.firstLoginCompleted = true
         repository.persistSession(session)
         _uiState.update { it.copy(session = it.session.copy(loggedIn = true, expired = false)) }
         viewModelScope.launch {
@@ -315,6 +357,16 @@ class TimetableViewModel(
         if (scheduleState.currentSemesterId.isBlank()) return
 
         val isRoomMode = scheduleState.queryMode == QueryMode.ROOM
+        // 教室课表必须登录后查询；个人课表在未登录时仍可看离线缓存
+        if (isRoomMode && !state.session.loggedIn) {
+            _uiState.update {
+                it.copy(
+                    schedule = it.schedule.copy(loading = false),
+                    session = it.session.copy(errorMessage = "查看教室课表需要登录")
+                )
+            }
+            return
+        }
         // 教室模式必须选中教学楼：只选校区会触发整校区大页面查询（实测 1MB+/12s+）
         if (isRoomMode && state.room.selectedBuildingId.isNullOrBlank()) {
             loadedQuery = null
@@ -337,6 +389,11 @@ class TimetableViewModel(
 
         scheduleJob?.cancel()
         scheduleJob = viewModelScope.launch {
+            // 没有活动会话或会话已失效：只读缓存，不再白打一次网络请求
+            if (!repository.hasStoredSession() || _uiState.value.session.expired) {
+                loadOfflineWeek(query)
+                return@launch
+            }
             // 缓存先上屏（同周次才用，避免显示错周数据）。
             // 注意：空课表也是合法缓存（假期/停课周），不能用 isNotEmpty 把它过滤掉，
             // 否则用户切到空周必须干等一次完整的网络请求。
@@ -396,8 +453,35 @@ class TimetableViewModel(
     }
 
     /**
+     * 未登录/会话失效时切周次：只读该周缓存，不发起网络请求。
+     */
+    private suspend fun loadOfflineWeek(query: ScheduleQuery) {
+        val cached = repository.readExactCache(query)
+        // 读取期间可能已经重新登录成功，不要用离线结果覆盖在线状态
+        if (repository.hasStoredSession() && !_uiState.value.session.expired) return
+        _uiState.update {
+            it.copy(
+                schedule = it.schedule.copy(
+                    loading = false,
+                    data = cached,
+                    fromCache = cached != null,
+                    staleCacheWeek = null
+                ),
+                session = it.session.copy(
+                    loggedIn = false,
+                    errorMessage = if (cached == null && !it.session.expired) {
+                        "该周没有离线缓存，登录后可查询"
+                    } else {
+                        null
+                    }
+                )
+            )
+        }
+    }
+
+    /**
      * 本周没有可用缓存且请求失败时，找出同一分区最近一次缓存，
-     * 让 UI 提示"第 N 周有缓存，点此查看"——而不是把别的周次当当前周显示。
+     * 让 UI 提示"第 N 周有缓存，点此切换"——而不是把别的周次当当前周显示。
      */
     private suspend fun offerStaleCache(query: ScheduleQuery) {
         val current = _uiState.value
@@ -420,6 +504,13 @@ class TimetableViewModel(
     fun switchQueryMode(mode: QueryMode) {
         val state = _uiState.value
         if (state.schedule.queryMode == mode) return
+        // 教室课表要求已登录；个人课表允许离线缓存
+        if (mode == QueryMode.ROOM && !state.session.loggedIn) {
+            _uiState.update {
+                it.copy(session = it.session.copy(errorMessage = "查看教室课表需要登录"))
+            }
+            return
+        }
 
         loadedQuery = null
         _uiState.update {
@@ -843,7 +934,7 @@ class TimetableViewModel(
         _uiState.update { it.copy(session = it.session.copy(errorMessage = null)) }
     }
 
-    /** 退出登录（保留本地课表缓存）。 */
+    /** 退出登录（保留本地课表缓存，退出后仍可离线查看）。 */
     fun logout() {
         scheduleJob?.cancel()
         repository.cancelRoomQueries()
@@ -853,6 +944,8 @@ class TimetableViewModel(
             roomSortMode = repository.roomSortMode,
             timetable = settings.activeTimetable
         )
+        // 退出后立即切到上次账号的离线课表，用户关掉登录提示即可查看
+        viewModelScope.launch { loadOfflinePersonal() }
     }
 
     override fun onCleared() {

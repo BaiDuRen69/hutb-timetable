@@ -215,6 +215,14 @@ fun LoginScreen(
                                 color = MaterialTheme.colorScheme.error
                             )
                         }
+                    } else if (!canBack) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "首次使用需要登录后才能进入；登录过一次后，后续启动可离线查看缓存。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }

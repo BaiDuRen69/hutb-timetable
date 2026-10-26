@@ -389,6 +389,8 @@ fun TimetableScreen(
 
             if (state.session.expired && state.schedule.data != null) {
                 SessionExpiredBanner(onLogin = onLogin)
+            } else if (!state.session.loggedIn && state.schedule.data != null) {
+                OfflineCacheBanner(onLogin = onLogin)
             }
 
             if (showFilterSheet) {
