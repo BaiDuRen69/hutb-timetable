@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -62,7 +63,10 @@ import com.hutb.timetable.core.ScheduleFilter
 import com.hutb.timetable.core.computeCurrentWeek
 import com.hutb.timetable.core.roomIdentity
 import com.hutb.timetable.core.sortRoomLabels
+import com.hutb.timetable.data.local.ClassTimetable
+import kotlinx.coroutines.delay
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 /**
  * 课表主界面。
@@ -88,7 +92,8 @@ fun TimetableScreen(
     onFilterChange: (ScheduleFilter) -> Unit,
     onToggleShortRoomNames: () -> Unit = {},
     onSelectRoomSortMode: (RoomSortMode) -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    onShowNowEmptyRooms: (ScheduleFilter) -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedCourse by remember { mutableStateOf<Course?>(null) }
@@ -98,6 +103,8 @@ fun TimetableScreen(
     var showOverflow by remember { mutableStateOf(false) }
     // 教室模式下"只看空教室"的开关（纯展示层状态，不进 ViewModel）
     var emptyRoomsOnly by rememberSaveable { mutableStateOf(false) }
+    // 从"现在/下一节空教室"进入后，跨节次自动更新筛选
+    var nowEmptyMode by rememberSaveable { mutableStateOf(false) }
 
 
     // 筛选后的课程，用于统计命中数
@@ -140,12 +147,18 @@ fun TimetableScreen(
         }
     }
     if (state.schedule.queryMode != QueryMode.ROOM) {
-        LaunchedEffect(Unit) { emptyRoomsOnly = false }
+        LaunchedEffect(Unit) {
+            emptyRoomsOnly = false
+            nowEmptyMode = false
+        }
     }
     // 选定具体教室后"只看空教室"没有意义：无论从选择器还是空教室列表进入，都关掉它，
     // 否则之后清除教室选择会突然跳回空教室列表
     LaunchedEffect(state.room.selectedRoomCode) {
-        if (state.room.selectedRoomCode != null) emptyRoomsOnly = false
+        if (state.room.selectedRoomCode != null) {
+            emptyRoomsOnly = false
+            nowEmptyMode = false
+        }
     }
     // 选了具体教室时，"空教室"清单没有意义（其它教室根本没查过），直接禁用
     val showEmptyRooms = state.schedule.queryMode == QueryMode.ROOM &&
@@ -180,6 +193,19 @@ fun TimetableScreen(
         computeCurrentWeek(state.semesterStartDate, LocalDate.now())
     }
     val isCurrentWeek = thisWeek != null && thisWeek == state.schedule.currentWeek
+    val nowTarget = rememberNowEmptyTarget(
+        timetable = state.timetable,
+        week = state.schedule.currentWeek,
+        enabled = isCurrentWeek && state.session.loggedIn
+    )
+    // 停留在"现在空教室"时，跨到下一节自动更新筛选（只影响客户端过滤，不重新请求）
+    LaunchedEffect(nowTarget, nowEmptyMode) {
+        if (nowEmptyMode && nowTarget != null &&
+            state.schedule.filter != nowTarget.filter
+        ) {
+            onFilterChange(nowTarget.filter)
+        }
+    }
 
     // 教室条件：校区 · 教学楼 · 教室（README 承诺的三级信息）
     val roomScopeLabel = remember(
@@ -380,12 +406,44 @@ fun TimetableScreen(
                 emptyRoomsOnly = emptyRoomsOnly,
                 emptyRoomsEnabled = state.room.selectedRoomCode == null,
                 filterSummary = filterSummary,
-                onSwitchQueryMode = onSwitchQueryMode,
+                onSwitchQueryMode = { mode ->
+                    nowEmptyMode = false
+                    onSwitchQueryMode(mode)
+                },
                 onOpenFilterSheet = { showFilterSheet = true },
-                onToggleEmptyOnly = { emptyRoomsOnly = !emptyRoomsOnly },
+                onToggleEmptyOnly = {
+                    emptyRoomsOnly = !emptyRoomsOnly
+                    nowEmptyMode = false
+                },
                 onToggleShortNames = onToggleShortRoomNames,
                 onSelectSortMode = onSelectRoomSortMode
             )
+
+            nowTarget?.let { target ->
+                NowEmptyRoomsBar(
+                    label = target.label,
+                    subtitle = target.subtitle,
+                    onClick = {
+                        nowEmptyMode = true
+                        emptyRoomsOnly = true
+                        val inRoomMode = state.schedule.queryMode == QueryMode.ROOM
+                        val buildingKnown = state.room.selectedBuildingId != null
+                        when {
+                            // 还没选教学楼：切到教室模式并保留筛选，选楼后直接显示空教室
+                            !buildingKnown -> {
+                                onFilterChange(target.filter)
+                                if (!inRoomMode) onSwitchQueryMode(QueryMode.ROOM)
+                            }
+                            // 已在该楼的整楼矩阵里，只需套用节次筛选
+                            inRoomMode && state.room.selectedRoomCode == null -> {
+                                onFilterChange(target.filter)
+                            }
+                            // 个人模式或正看着某间教室：一次性切模式/清教室并重查
+                            else -> onShowNowEmptyRooms(target.filter)
+                        }
+                    }
+                )
+            }
 
             if (state.session.expired && state.schedule.data != null) {
                 SessionExpiredBanner(onLogin = onLogin)
@@ -400,7 +458,10 @@ fun TimetableScreen(
                 FilterSheet(
                     filter = state.schedule.filter,
                     onDismiss = { showFilterSheet = false },
-                    onApply = onFilterChange
+                    onApply = {
+                        nowEmptyMode = false
+                        onFilterChange(it)
+                    }
                 )
             }
 
@@ -433,7 +494,8 @@ fun TimetableScreen(
                         shortNames = state.shortRoomNames,
                         buildingName = state.room.selectedBuilding,
                         sortMode = state.roomSortMode,
-                        allRooms = allRoomsForMatrix
+                        allRooms = allRoomsForMatrix,
+                        week = state.schedule.currentWeek
                     )
                 }
             } else {
@@ -488,6 +550,7 @@ fun TimetableScreen(
                                 // 点教室直接查看它的课表；空教室列表随之自动收起
                                 onRoomClick = { room ->
                                     emptyRoomsOnly = false
+                                    nowEmptyMode = false
                                     onSelectRoom(room)
                                 },
                                 modifier = Modifier.fillMaxSize()
@@ -517,7 +580,10 @@ fun TimetableScreen(
                                 text = "当前筛选条件下没有课程",
                                 icon = Icons.Outlined.FilterAltOff,
                                 actionLabel = "清除筛选",
-                                onAction = { onFilterChange(ScheduleFilter()) },
+                                onAction = {
+                                    nowEmptyMode = false
+                                    onFilterChange(ScheduleFilter())
+                                },
                                 modifier = Modifier.align(Alignment.Center)
                             )
                         }
@@ -530,8 +596,9 @@ fun TimetableScreen(
                                 onCourseClick = { selectedCourse = it },
                                 modifier = Modifier.fillMaxSize(),
                                 timetable = state.timetable,
-                                // 未设开学日期时退回旧行为（按本周显示今天/现在）
-                                isCurrentWeek = thisWeek == null || thisWeek == state.schedule.currentWeek
+                                // 未设开学日期无法确认今天是第几周，不能画“今天/现在”误导用户
+                                isCurrentWeek = thisWeek != null &&
+                                    thisWeek == state.schedule.currentWeek
                             )
                         }
                     }
@@ -558,6 +625,100 @@ fun TimetableScreen(
                 showWeekDialog = false
                 onSelectWeek(it)
             }
+        )
+    }
+}
+
+private data class NowEmptyTarget(
+    val label: String,
+    val subtitle: String,
+    val filter: ScheduleFilter
+)
+
+/**
+ * 今天当前或下一节的空教室入口。
+ *
+ * 只在“显示的是真实本周且已登录”时出现；未设开学日期时无法确认周次，不猜。
+ * 每分钟更新一次，跨节次后按钮文案和筛选自动切换。
+ */
+@Composable
+private fun rememberNowEmptyTarget(
+    timetable: ClassTimetable?,
+    week: Int,
+    enabled: Boolean
+): NowEmptyTarget? {
+    if (!enabled) return null
+    val now by produceState(initialValue = LocalDateTime.now()) {
+        while (true) {
+            value = LocalDateTime.now()
+            delay(60_000)
+        }
+    }
+    val today = now.dayOfWeek.value
+    val nowMinutes = now.hour * 60 + now.minute
+    val slot = PERIOD_SLOTS.firstOrNull { candidate ->
+        val range = slotRangeMinutes(timetable, candidate) ?: return@firstOrNull false
+        nowMinutes <= range.last
+    } ?: return null
+    val range = slotRangeMinutes(timetable, slot) ?: return null
+    val weekday = WEEKDAY_NAMES.getOrNull(today - 1) ?: return null
+    val isNow = nowMinutes >= range.first
+    return NowEmptyTarget(
+        label = if (isNow) "现在空教室" else "下一节空教室",
+        subtitle = "第${week}周 · ${weekday}第${slot.start}-${slot.end}节 · " +
+            slotTimeLabel(timetable, slot),
+        filter = ScheduleFilter(
+            weekdays = setOf(today),
+            startPeriod = slot.start,
+            endPeriod = slot.end
+        )
+    )
+}
+
+@Composable
+private fun NowEmptyRoomsBar(
+    label: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.MeetingRoom,
+            contentDescription = null,
+            tint = contentColor,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text(
+            text = "查看",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = contentColor
         )
     }
 }

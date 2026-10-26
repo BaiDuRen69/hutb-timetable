@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hutb.timetable.core.Course
 import com.hutb.timetable.core.ScheduleFilter
+import com.hutb.timetable.core.SlotCoverage
+import com.hutb.timetable.core.slotCoverage
 import com.hutb.timetable.data.local.ClassTimetable
 import com.hutb.timetable.ui.theme.LocalIsDarkTheme
 import kotlinx.coroutines.delay
@@ -111,7 +113,18 @@ fun WeekGrid(
             }
             matched.forEachIndexed { index, slot ->
                 map.getOrPut(course.weekday to slot.start) { mutableListOf() }
-                    .add(SlotCourse(course, continued = index > 0))
+                    .add(
+                        SlotCourse(
+                            course = course,
+                            continued = index > 0,
+                            coverage = slotCoverage(
+                                courseStart = course.startPeriod,
+                                courseEnd = course.endPeriod,
+                                slotStart = slot.start,
+                                slotEnd = slot.end
+                            )
+                        )
+                    )
             }
         }
         map
@@ -419,7 +432,7 @@ private fun DayCell(
     ) {
         if (courses.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize())
-        } else {
+        } else if (courses.all { it.coverage == SlotCoverage.FULL }) {
             Column(modifier = Modifier.fillMaxSize()) {
                 courses.forEach { item ->
                     CourseCard(
@@ -432,14 +445,37 @@ private fun DayCell(
                     )
                 }
             }
+        } else {
+            // 课程只占半格时按上/下半格对齐，避免把 1-3 节画成 1-4 节
+            Box(modifier = Modifier.fillMaxSize()) {
+                courses.forEach { item ->
+                    val fraction = if (item.coverage == SlotCoverage.FULL) 1f else 0.5f
+                    val alignment = when (item.coverage) {
+                        SlotCoverage.BOTTOM_HALF -> Alignment.BottomCenter
+                        SlotCoverage.TOP_HALF -> Alignment.TopCenter
+                        else -> Alignment.Center
+                    }
+                    CourseCard(
+                        course = item.course,
+                        onClick = { onCourseClick(item.course) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(fraction)
+                            .align(alignment),
+                        continued = item.continued,
+                        compact = item.coverage != SlotCoverage.FULL
+                    )
+                }
+            }
         }
     }
 }
 
-/** 网格里的课程 + 它是该课程的第几段（第二段起显示"续"）。 */
+/** 网格里的课程 + 它是该课程的第几段（第二段起显示"续"） + 在该格子里的实际占用。 */
 private data class SlotCourse(
     val course: Course,
-    val continued: Boolean
+    val continued: Boolean,
+    val coverage: SlotCoverage
 )
 
 /**
@@ -460,12 +496,14 @@ fun CourseCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     /** 连堂课的第二段起：显示"续"而不是重复一遍完整信息 */
-    continued: Boolean = false
+    continued: Boolean = false,
+    /** 半格卡片：只显示一行，给准确占位让路 */
+    compact: Boolean = false
 ) {
     val palette = coursePalette(course.courseName)
     Row(
         modifier = modifier
-            .heightIn(min = 40.dp)
+            .heightIn(min = if (compact) 24.dp else 40.dp)
             .clip(MaterialTheme.shapes.small)
             .background(palette.background)
             .clickable(onClick = onClick),
@@ -480,27 +518,33 @@ fun CourseCard(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 6.dp, vertical = 3.dp)
+                .padding(horizontal = 6.dp, vertical = if (compact) 1.dp else 3.dp)
         ) {
             Text(
                 text = if (continued) "续 · ${course.courseName}" else course.courseName,
-                style = MaterialTheme.typography.bodyMedium,
+                style = if (compact) {
+                    MaterialTheme.typography.bodySmall
+                } else {
+                    MaterialTheme.typography.bodyMedium
+                },
                 fontWeight = FontWeight.SemiBold,
                 color = palette.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val meta = listOf(course.classroom, course.teacher)
-                .filter { it.isNotBlank() }
-                .joinToString(" · ")
-            if (meta.isNotEmpty()) {
-                Text(
-                    text = meta,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.text.copy(alpha = 0.85f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            if (!compact) {
+                val meta = listOf(course.classroom, course.teacher)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Text(
+                        text = meta,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = palette.text.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

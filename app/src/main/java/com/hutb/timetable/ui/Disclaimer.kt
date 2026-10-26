@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 
 /** 免责声明正文；首次启动弹窗、登录页与设置页共用，避免多处措辞不一致。 */
 const val DISCLAIMER_BODY =
@@ -24,7 +25,12 @@ const val DISCLAIMER_BODY =
 @Composable
 fun DisclaimerDialog(onConfirm: () -> Unit) {
     AlertDialog(
-        onDismissRequest = onConfirm,
+        // 使用须知必须点“我已了解”确认；点外部或按返回不算同意
+        onDismissRequest = {},
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        ),
         title = { Text("使用须知") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {

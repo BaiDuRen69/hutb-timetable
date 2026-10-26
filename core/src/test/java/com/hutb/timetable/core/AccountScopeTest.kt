@@ -3,6 +3,7 @@ package com.hutb.timetable.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AccountScopeTest {
@@ -30,5 +31,25 @@ class AccountScopeTest {
         val key = accountCacheKey("2523040002")
         assertEquals(16, key.length)
         assertFalse(key.contains("2523040002"))
+    }
+
+    @Test
+    fun `学号未知时才回退到上次账号分区`() {
+        val last = accountCacheKey("2523040002")
+        assertEquals(last, readableAccountKey("", last))
+        assertEquals(last, readableAccountKey(null, last))
+    }
+
+    @Test
+    fun `学号已知时绝不读取上一个账号的分区`() {
+        val lastA = accountCacheKey("2523040002")
+        assertEquals(accountCacheKey("2523040003"), readableAccountKey("2523040003", lastA))
+    }
+
+    @Test
+    fun `新登录身份未解析且旧键已清空时不读任何分区`() {
+        // persistSession 会清空 lastAccountKey；此时不能退回 A 的缓存
+        assertNull(readableAccountKey("", ""))
+        assertNull(readableAccountKey(null, null))
     }
 }

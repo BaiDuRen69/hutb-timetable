@@ -20,7 +20,6 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -212,8 +211,13 @@ class JsxsdApi(
         if (fallback.isNotEmpty()) return@withContext fallback
 
         throw HutbError.Parse(
-            "未能解析出学年学期列表。请点右上角 🐞 打开「页面快照」，" +
-                "选中最新的一份点「复制指纹」，把内容发给我即可精准适配改版后的结构。",
+            if (BuildConfig.DEBUG) {
+                "未能解析出学年学期列表。请点右上角 🐞 打开「页面快照」，" +
+                    "选中最新的一份点「复制指纹」，把内容发给我即可精准适配改版后的结构。"
+            } else {
+                "未能解析出学年学期列表，可能是教务系统改版或返回异常。请稍后重试；" +
+                    "若持续失败，请等待应用更新。"
+            },
             lastError
         )
     }
@@ -519,18 +523,6 @@ class JsxsdApi(
     private val inFlightRoomPages = ConcurrentHashMap<String, Deferred<String?>>()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /**
-     * 释放后台资源：取消在途请求、清空页面缓存并取消 scope。
-     *
-     * JsxsdApi 是进程级单例，正常运行不需要调用；
-     * 保留显式入口，避免"scope 永不取消且无法取消"。
-     */
-    fun dispose() {
-        cancelInFlightRoomRequests()
-        synchronized(roomTableCache) { roomTableCache.clear() }
-        scope.cancel()
-    }
 
     /**
      * 获取校区列表。

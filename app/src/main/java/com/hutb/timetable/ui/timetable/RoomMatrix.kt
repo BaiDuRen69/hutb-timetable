@@ -1,5 +1,6 @@
 package com.hutb.timetable.ui.timetable
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.foundation.Canvas
@@ -26,10 +27,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,7 +99,9 @@ fun RoomMatrix(
     buildingName: String? = null,
     sortMode: RoomSortMode = RoomSortMode.BY_BUILDING,
     /** 教学楼的全部教室清单；没课的教室也会占一行 */
-    allRooms: List<String> = emptyList()
+    allRooms: List<String> = emptyList(),
+    /** 当前周次，仅用于无障碍播报 */
+    week: Int = 0
 ) {
     val normalized = remember(courses) {
         courses.map { course ->
@@ -244,7 +249,9 @@ fun RoomMatrix(
                         visibleDays = visibleDays,
                         visibleSlots = visibleSlots,
                         slotWidth = slotWidth,
-                        rowHeight = rowHeight
+                        rowHeight = rowHeight,
+                        week = week,
+                        rowLabel = row.label
                     )
                     Row(modifier = Modifier.height(rowHeight)) {
                         Box(
@@ -334,7 +341,9 @@ private fun rememberRoomCanvasData(
     visibleDays: List<Int>,
     visibleSlots: List<PeriodSlot>,
     slotWidth: Dp,
-    rowHeight: Dp
+    rowHeight: Dp,
+    week: Int,
+    rowLabel: String
 ): RoomCanvasData {
     val density = LocalDensity.current
     val dark = LocalIsDarkTheme.current
@@ -355,7 +364,8 @@ private fun rememberRoomCanvasData(
     return remember(
         courses, visibleDays, visibleSlots,
         slotWidthPx, rowHeightPx, dark, nameStyle, teacherStyle,
-        surface, gridLine, measurer, density.density, density.fontScale
+        surface, gridLine, measurer, density.density, density.fontScale,
+        week, rowLabel
     ) {
         val cards = courses.mapNotNull { course ->
             val dayIndex = visibleDays.indexOf(course.weekday)
@@ -394,12 +404,13 @@ private fun rememberRoomCanvasData(
             } else {
                 "第${course.startPeriod}-${course.endPeriod}节"
             }
-            val accessibilityLabel = listOf(
+            val accessibilityLabel = listOfNotNull(
+                week.takeIf { it > 0 }?.let { "第${it}周" },
                 WEEKDAY_NAMES.getOrNull(course.weekday - 1).orEmpty() + periodText,
-                course.courseName,
-                course.classroom,
-                course.teacher
-            ).filter { it.isNotBlank() }.joinToString(" ")
+                course.courseName.takeIf { it.isNotBlank() },
+                course.classroom.ifBlank { rowLabel }.takeIf { it.isNotBlank() },
+                course.teacher.takeIf { it.isNotBlank() }
+            ).joinToString("，")
             CanvasCourse(
                 course = course,
                 leftPx = (dayIndex * visibleSlots.size + firstIdx) * slotWidthPx + insetPx,
@@ -442,11 +453,7 @@ private fun RoomGridCanvas(
     onCourseClick: (Course) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val accessibilityEnabled = remember(context) {
-        (context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager)
-            ?.isTouchExplorationEnabled == true
-    }
+    val accessibilityEnabled = rememberAccessibilityOverlayEnabled()
     val density = LocalDensity.current
     var viewportWidthPx by remember { mutableIntStateOf(0) }
 
@@ -551,11 +558,51 @@ private fun RoomGridCanvas(
                                 contentDescription = card.accessibilityLabel
                                 role = Role.Button
                             }
-                            .clickable { onCourseClick(card.course) }
+                            .clickable(
+                                onClickLabel = "查看课程详情"
+                            ) { onCourseClick(card.course) }
                     )
                 }
         }
     }
+}
+
+/**
+ * 读屏/辅助服务开启时为 Canvas 叠加语义节点。
+ *
+ * 监听开关变化而不是只读一次：用户在 App 运行中打开 TalkBack 后，
+ * 当前页面不用重建也能获得可聚焦的课程卡；关闭后恢复普通 Canvas 点击。
+ * Switch Access 等不依赖“触摸探索”的服务也需要节点，因此同时看服务列表。
+ */
+@Composable
+private fun rememberAccessibilityOverlayEnabled(): Boolean {
+    val context = LocalContext.current
+    val manager = remember(context) {
+        context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    }
+    var enabled by remember(manager) { mutableStateOf(manager.needsAccessibilityOverlay()) }
+    DisposableEffect(manager) {
+        if (manager == null) return@DisposableEffect onDispose {}
+        val touchListener = AccessibilityManager.TouchExplorationStateChangeListener {
+            enabled = manager.needsAccessibilityOverlay()
+        }
+        val serviceListener = AccessibilityManager.AccessibilityStateChangeListener {
+            enabled = manager.needsAccessibilityOverlay()
+        }
+        manager.addTouchExplorationStateChangeListener(touchListener)
+        manager.addAccessibilityStateChangeListener(serviceListener)
+        onDispose {
+            manager.removeTouchExplorationStateChangeListener(touchListener)
+            manager.removeAccessibilityStateChangeListener(serviceListener)
+        }
+    }
+    return enabled
+}
+
+private fun AccessibilityManager?.needsAccessibilityOverlay(): Boolean {
+    if (this == null) return false
+    return isTouchExplorationEnabled ||
+        getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK).isNotEmpty()
 }
 
 @Composable

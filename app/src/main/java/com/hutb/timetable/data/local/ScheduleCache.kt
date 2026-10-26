@@ -266,11 +266,6 @@ class ScheduleCache(context: Context) : SQLiteOpenHelper(
         writableDatabase.delete(TABLE_SCHEDULE, null, null)
         writableDatabase.delete(TABLE_SEMESTER, null, null)
     }
-
-    /** 清空课表缓存（保留学期列表）。 */
-    fun clearSchedules() {
-        writableDatabase.delete(TABLE_SCHEDULE, null, null)
-    }
 }
 
 /**

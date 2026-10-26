@@ -100,6 +100,7 @@ fun SettingsScreen(
     }
     var expandedId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWeekPicker by rememberSaveable { mutableStateOf(false) }
+    var showStartDateEditor by rememberSaveable { mutableStateOf(false) }
     var showClearConfirm by rememberSaveable { mutableStateOf(false) }
     var showSponsor by rememberSaveable { mutableStateOf(false) }
 
@@ -163,7 +164,7 @@ fun SettingsScreen(
                     Text(
                         text = when {
                             !canEditStartDate -> "每个学期的周次独立保存"
-                            startDate.isBlank() -> "选择后自动推算第一周周一"
+                            startDate.isBlank() -> "设置后才能准确显示今天/现在和当前空教室"
                             else -> "第一周周一：$startDate"
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -176,6 +177,16 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+            }
+            if (canEditStartDate) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = { showStartDateEditor = true }) {
+                        Text("直接填写第一周周一", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }
@@ -425,6 +436,57 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showWeekPicker = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showStartDateEditor) {
+        // 知道准确开学日期的用户可以直接输入，不必按“今天第几周”反推
+        var dateText by rememberSaveable(startDate) { mutableStateOf(startDate) }
+        var dateError by rememberSaveable { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { showStartDateEditor = false },
+            title = { Text("第一周周一") },
+            text = {
+                Column {
+                    Text(
+                        text = "输入第一周周一的日期，App 会据此推算今天属于第几周。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = dateText,
+                        onValueChange = {
+                            dateText = it
+                            dateError = null
+                        },
+                        singleLine = true,
+                        isError = dateError != null,
+                        label = { Text("日期") },
+                        placeholder = { Text("例如 2026-09-07") },
+                        supportingText = dateError?.let { message ->
+                            { Text(message) }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val parsed = runCatching { LocalDate.parse(dateText.trim()) }.getOrNull()
+                    if (parsed == null) {
+                        dateError = "日期格式应为 yyyy-MM-dd，例如 2026-09-07"
+                    } else {
+                        val value = parsed.toString()
+                        startDate = value
+                        settings.setSemesterStartDateFor(semesterId, value)
+                        showStartDateEditor = false
+                        onChanged()
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartDateEditor = false }) { Text("取消") }
             }
         )
     }

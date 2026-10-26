@@ -138,17 +138,19 @@ class TimetableViewModel(
             viewModelScope.launch {
                 // 先把学期/课表缓存上屏，身份解析放到后面，避免网络慢时一直空白。
                 // 缓存读取会回退到 lastAccountKey（新登录时会先清空，不会串号）。
+                val hadIdentity = repository.studentId.isNotBlank()
                 val cached = repository.readSemestersCache()
                 if (currentSemesterOrDefault(cached) != null) {
                     applySemesters(cached)
-                    loadSchedule()
+                    // 身份未知时先只读缓存、不发网络：此时写不了账号分区，
+                    // 发了也会在身份解析后再发一次，纯属重复请求。
+                    if (hadIdentity) loadSchedule() else loadCachedScheduleOnly()
                 }
                 // 身份未知（升级/首次登录未解析）时解析学号；
                 // 失败时如果能读到缓存，继续展示缓存，但本次不写新缓存。
-                val hadIdentity = repository.studentId.isNotBlank()
                 val resolved = ensureIdentity()
                 if (resolved && !hadIdentity) {
-                    // 刚才的查询没有账号分区可写缓存，身份回来后重查一次补写
+                    // 身份回来后只补发这一次网络请求，并把结果写入正确分区
                     loadSchedule()
                 }
                 if (!resolved && repository.studentId.isBlank() &&
@@ -202,6 +204,35 @@ class TimetableViewModel(
                     staleCacheWeek = null
                 ),
                 session = it.session.copy(loggedIn = false, expired = false, errorMessage = null)
+            )
+        }
+    }
+
+    /**
+     * 身份尚未解析时，只用上次账号分区把缓存上屏，不发起网络请求。
+     *
+     * 等到 [ensureIdentity] 成功后再走一次完整的 [loadSchedule]，
+     * 避免"先查一次、身份回来后立刻重查一次"的重复请求。
+     */
+    private suspend fun loadCachedScheduleOnly() {
+        val scheduleState = _uiState.value.schedule
+        if (scheduleState.currentSemesterId.isBlank()) return
+        val query = ScheduleQuery(
+            semesterId = scheduleState.currentSemesterId,
+            week = scheduleState.currentWeek,
+            roomMode = false
+        )
+        val cached = repository.readExactCache(query)
+        // 读取期间身份已解析：让后续 loadSchedule 走完整流程，别用缓存覆盖在线结果
+        if (repository.studentId.isNotBlank()) return
+        _uiState.update {
+            it.copy(
+                schedule = it.schedule.copy(
+                    data = cached,
+                    fromCache = cached != null,
+                    loading = false,
+                    staleCacheWeek = null
+                )
             )
         }
     }
@@ -277,23 +308,6 @@ class TimetableViewModel(
                 switchWeek(computed)
             }
         }
-    }
-
-    /** 更新当前学期的开学日期并按新日期重新推算周次。 */
-    fun updateSemesterStartDate(date: String) {
-        val semesterId = _uiState.value.schedule.currentSemesterId
-        if (semesterId.isBlank()) return
-        settings.setSemesterStartDateFor(semesterId, date)
-        val week = settings.currentWeekNumber(semesterId) ?: 1
-        loadedQuery = null
-        _uiState.update {
-            it.copy(
-                semesterStartDate = date,
-                schedule = it.schedule.copy(currentWeek = week, data = null),
-                session = it.session.copy(errorMessage = null)
-            )
-        }
-        loadSchedule()
     }
 
     /** 登录成功后调用。 */
@@ -808,6 +822,40 @@ class TimetableViewModel(
         _uiState.update { it.copy(room = it.room.copy(selectedRoomCode = null)) }
         repository.rememberRoomCode(null)
         loadSchedule()
+    }
+
+    /**
+     * 进入“现在 / 下一节空教室”：
+     * 清掉具体教室限制、套用当前节次筛选并切到教室模式，尽量只发一次查询。
+     */
+    fun showNowEmptyRooms(filter: ScheduleFilter) {
+        val state = _uiState.value
+        if (!state.session.loggedIn) {
+            _uiState.update {
+                it.copy(session = it.session.copy(errorMessage = "查看教室课表需要登录"))
+            }
+            return
+        }
+        val enteringRoom = state.schedule.queryMode != QueryMode.ROOM
+        val hasBuilding = state.room.selectedBuildingId != null
+        loadedQuery = null
+        repository.rememberRoomCode(null)
+        _uiState.update {
+            it.copy(
+                room = it.room.copy(selectedRoomCode = null),
+                schedule = it.schedule.copy(
+                    queryMode = QueryMode.ROOM,
+                    filter = filter,
+                    data = null,
+                    staleCacheWeek = null
+                ),
+                session = it.session.copy(errorMessage = null)
+            )
+        }
+        if (enteringRoom) loadRoomOptions()
+        // 没有教学楼时 loadRoomOptions 会尝试恢复上次选择并自行查询；
+        // 已有教学楼才在这里发起查询，避免一次点击打两次网络请求。
+        if (hasBuilding) loadSchedule()
     }
 
     /**

@@ -11,9 +11,7 @@ data class AuthSession(
     /** 强智 SERVERID，缺失时部分接口会要求 */
     val serverId: String = "",
     /** 登录显示名（姓名 / 账号） */
-    val displayName: String = "",
-    /** 会话创建时间戳（毫秒） */
-    val createdAt: Long = System.currentTimeMillis()
+    val displayName: String = ""
 ) {
     val isValid: Boolean get() = jsessionId.isNotBlank()
 }

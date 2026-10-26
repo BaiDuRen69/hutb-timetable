@@ -8,6 +8,7 @@ import com.hutb.timetable.data.local.ScheduleCache
 import com.hutb.timetable.data.model.AuthSession
 import com.hutb.timetable.core.Course
 import com.hutb.timetable.core.accountCacheKey
+import com.hutb.timetable.core.readableAccountKey
 import com.hutb.timetable.core.HutbError
 import com.hutb.timetable.core.RoomOption
 import com.hutb.timetable.core.RoomSortMode
@@ -204,7 +205,7 @@ class TimetableRepository(
      * 因此它要么属于当前会话，要么属于上一次成功登录的账号，不会串到第三个人。
      */
     private fun readAccountKey(): String? =
-        accountKey() ?: prefs.lastAccountKey.takeIf { it.isNotBlank() }
+        readableAccountKey(credentials.studentId, prefs.lastAccountKey)
 
     private fun scoped(scope: String, forRead: Boolean = false): String? {
         val key = if (forRead) readAccountKey() else accountKey()

@@ -222,6 +222,7 @@ class MainActivity : ComponentActivity() {
                         onSelectRoom = { vm.selectRoom(it) },
                         onToggleShortRoomNames = { vm.toggleShortRoomNames() },
                         onSelectRoomSortMode = { vm.setRoomSortMode(it) },
+                        onShowNowEmptyRooms = { vm.showNowEmptyRooms(it) },
                         onOpenSettings = { showSettings = true },
                         onShowSnapshots = {
                             snapshots = PageSnapshot.list(this@MainActivity)
