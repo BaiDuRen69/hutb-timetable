@@ -50,7 +50,9 @@ internal fun HeaderBars(
     onOpenFilterSheet: () -> Unit,
     onToggleEmptyOnly: () -> Unit,
     onToggleShortNames: () -> Unit,
-    onSelectSortMode: (RoomSortMode) -> Unit
+    onSelectSortMode: (RoomSortMode) -> Unit,
+    listMode: Boolean = false,
+    onToggleListMode: () -> Unit = {}
 ) {
     var showTools by remember { mutableStateOf(false) }
     val filterActive = state.schedule.filter.isActive
@@ -112,6 +114,15 @@ internal fun HeaderBars(
                         onClick = {
                             showTools = false
                             onToggleEmptyOnly()
+                        }
+                    )
+                }
+                if (state.schedule.queryMode == QueryMode.ROOM) {
+                    DropdownMenuItem(
+                        text = { Text(if (listMode) "✓ 列表视图" else "列表视图（读屏友好）") },
+                        onClick = {
+                            showTools = false
+                            onToggleListMode()
                         }
                     )
                 }

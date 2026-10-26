@@ -1,5 +1,9 @@
 package com.hutb.timetable.ui.timetable
 
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -18,12 +22,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.EventBusy
 import androidx.compose.material.icons.outlined.FilterAltOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -105,7 +112,29 @@ fun TimetableScreen(
     var emptyRoomsOnly by rememberSaveable { mutableStateOf(false) }
     // 从"现在/下一节空教室"进入后，跨节次自动更新筛选
     var nowEmptyMode by rememberSaveable { mutableStateOf(false) }
+    // 教室模式：Canvas 矩阵 / 线性列表（读屏友好）
+    var roomListMode by rememberSaveable { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    var pendingIcs by remember { mutableStateOf<String?>(null) }
+    val icsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/calendar")
+    ) { uri ->
+        val text = pendingIcs
+        pendingIcs = null
+        if (uri != null && text != null) {
+            val ok = runCatching {
+                context.contentResolver.openOutputStream(uri)?.use {
+                    it.write(text.toByteArray(Charsets.UTF_8))
+                } ?: error("无法写入所选文件")
+            }.isSuccess
+            Toast.makeText(
+                context,
+                if (ok) "日历文件已导出" else "导出失败，请重试",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     // 筛选后的课程，用于统计命中数
     val visibleCourses = remember(state.schedule.data, state.schedule.filter) {
@@ -366,6 +395,66 @@ fun TimetableScreen(
                                     onOpenSettings()
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("分享当前课表") },
+                                leadingIcon = { Icon(Icons.Default.Share, null) },
+                                enabled = visibleCourses.isNotEmpty(),
+                                onClick = {
+                                    showOverflow = false
+                                    val semesterName = state.schedule.semesters
+                                        .firstOrNull { it.id == state.schedule.currentSemesterId }?.name
+                                        ?: state.schedule.data?.semesterName.orEmpty()
+                                    val text = buildScheduleShareText(
+                                        semesterName = semesterName,
+                                        week = state.schedule.currentWeek,
+                                        courses = visibleCourses,
+                                        filter = state.schedule.filter,
+                                        roomScope = if (state.schedule.queryMode == QueryMode.ROOM) {
+                                            roomScopeLabel
+                                        } else {
+                                            ""
+                                        }
+                                    )
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "湖南工商大学课表")
+                                        putExtra(Intent.EXTRA_TEXT, text)
+                                    }
+                                    context.startActivity(Intent.createChooser(send, "分享课表"))
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("导出当前课表 (.ics)") },
+                                leadingIcon = { Icon(Icons.Default.DateRange, null) },
+                                enabled = visibleCourses.isNotEmpty() &&
+                                    state.semesterStartDate.isNotBlank() &&
+                                    state.timetable != null,
+                                onClick = {
+                                    showOverflow = false
+                                    val data = state.schedule.data
+                                    if (data != null) {
+                                        val ics = buildWeekIcs(
+                                            semesterStartDate = state.semesterStartDate,
+                                            week = state.schedule.currentWeek,
+                                            semesterName = data.semesterName,
+                                            courses = visibleCourses,
+                                            timetable = state.timetable
+                                        )
+                                        if (ics == null) {
+                                            Toast.makeText(
+                                                context,
+                                                "请先设置开学日期和作息时间表",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            pendingIcs = ics
+                                            icsLauncher.launch(
+                                                icsFileName(data.semesterName, state.schedule.currentWeek)
+                                            )
+                                        }
+                                    }
+                                }
+                            )
                             if (BuildConfig.DEBUG) {
                                 DropdownMenuItem(
                                     text = { Text("页面快照") },
@@ -416,7 +505,9 @@ fun TimetableScreen(
                     nowEmptyMode = false
                 },
                 onToggleShortNames = onToggleShortRoomNames,
-                onSelectSortMode = onSelectRoomSortMode
+                onSelectSortMode = onSelectRoomSortMode,
+                listMode = roomListMode,
+                onToggleListMode = { roomListMode = !roomListMode }
             )
 
             nowTarget?.let { target ->
@@ -472,31 +563,41 @@ fun TimetableScreen(
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    if (visibleCourses.isEmpty()) {
-                        Text(
-                            text = if (state.schedule.filter.isActive) {
-                                "当前筛选条件下没有课程，矩阵仍显示全部教室"
-                            } else {
-                                "本周还没有教室课程安排"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    if (roomListMode) {
+                        RoomCourseList(
+                            courses = visibleCourses,
+                            onCourseClick = { selectedCourse = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                        )
+                    } else {
+                        if (visibleCourses.isEmpty()) {
+                            Text(
+                                text = if (state.schedule.filter.isActive) {
+                                    "当前筛选条件下没有课程，矩阵仍显示全部教室"
+                                } else {
+                                    "本周还没有教室课程安排"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                        }
+                        RoomMatrix(
+                            courses = state.schedule.data.courses,
+                            filter = state.schedule.filter,
+                            onCourseClick = { selectedCourse = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            shortNames = state.shortRoomNames,
+                            buildingName = state.room.selectedBuilding,
+                            sortMode = state.roomSortMode,
+                            allRooms = allRoomsForMatrix,
+                            week = state.schedule.currentWeek
                         )
                     }
-                    RoomMatrix(
-                        courses = state.schedule.data.courses,
-                        filter = state.schedule.filter,
-                        onCourseClick = { selectedCourse = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        shortNames = state.shortRoomNames,
-                        buildingName = state.room.selectedBuilding,
-                        sortMode = state.roomSortMode,
-                        allRooms = allRoomsForMatrix,
-                        week = state.schedule.currentWeek
-                    )
                 }
             } else {
                 Box(modifier = Modifier.fillMaxSize()) {

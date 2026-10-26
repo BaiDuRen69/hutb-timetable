@@ -1,5 +1,6 @@
 package com.hutb.timetable.ui.settings
 
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -51,6 +52,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hutb.timetable.BuildConfig
@@ -270,6 +273,42 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        // ---- 隐私与许可 ----
+        SectionCard(title = "隐私与许可") {
+            Text(
+                text = "隐私：账号密码只在教务系统页面内输入，App 不保存密码；" +
+                    "登录会话加密保存在本机，课表缓存只留本机，不上传第三方。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "开源组件：AndroidX / Kotlin（Apache 2.0）、OkHttp（Apache 2.0）、" +
+                    "Jsoup（MIT）。完整许可见各组件仓库。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            val clipboard = LocalClipboardManager.current
+            var copied by remember { mutableStateOf(false) }
+            OutlinedButton(onClick = {
+                clipboard.setText(
+                    AnnotatedString(
+                        buildString {
+                            append("课表查询 v").append(BuildConfig.VERSION_NAME)
+                            append("\nAndroid ").append(Build.VERSION.RELEASE)
+                            append(" (API ").append(Build.VERSION.SDK_INT).append(')')
+                            append("\n机型：").append(Build.MANUFACTURER).append(' ')
+                            append(Build.MODEL)
+                        }
+                    )
+                )
+                copied = true
+            }) {
+                Text(if (copied) "已复制诊断信息" else "复制诊断信息（反馈时附上）")
+            }
         }
 
         // ---- 支持作者 ----

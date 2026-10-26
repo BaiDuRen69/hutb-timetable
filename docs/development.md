@@ -80,7 +80,7 @@ tasks.register('unitTest', JavaExec) {
 
 ```bash
 ./gradlew :core:unitTest --console=plain
-# 输出：JUnit version 4.13.2 / OK (117 tests)
+# 输出：JUnit version 4.13.2 / OK (122 tests)
 ```
 
 > 注意：Gradle 9 的 `JavaExec` **没有公开的 `argsProvider` setter**，
