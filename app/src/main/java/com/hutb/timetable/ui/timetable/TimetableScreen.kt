@@ -22,7 +22,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.MoreVert
@@ -67,6 +69,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hutb.timetable.BuildConfig
 import com.hutb.timetable.core.Course
+import com.hutb.timetable.core.CourseChange
+import com.hutb.timetable.core.CourseChangeKind
 import com.hutb.timetable.core.RoomSortMode
 import com.hutb.timetable.core.ScheduleFilter
 import com.hutb.timetable.core.computeCurrentWeek
@@ -102,7 +106,8 @@ fun TimetableScreen(
     onToggleShortRoomNames: () -> Unit = {},
     onSelectRoomSortMode: (RoomSortMode) -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onShowNowEmptyRooms: (ScheduleFilter) -> Unit = {}
+    onShowNowEmptyRooms: (ScheduleFilter) -> Unit = {},
+    onDismissChanges: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedCourse by remember { mutableStateOf<Course?>(null) }
@@ -523,6 +528,15 @@ fun TimetableScreen(
                 onToggleListMode = { roomListMode = !roomListMode }
             )
 
+            if (state.schedule.queryMode == QueryMode.PERSONAL &&
+                state.schedule.changes.isNotEmpty()
+            ) {
+                ScheduleChangesBanner(
+                    changes = state.schedule.changes,
+                    onDismiss = onDismissChanges
+                )
+            }
+
             todayStatus?.takeIf { it.todayCount > 0 }?.let { status ->
                 TodayCourseCard(
                     status = status,
@@ -758,6 +772,107 @@ fun TimetableScreen(
                 onSelectWeek(it)
             }
         )
+    }
+}
+
+@Composable
+private fun ScheduleChangesBanner(
+    changes: List<CourseChange>,
+    onDismiss: () -> Unit
+) {
+    var expanded by remember(changes) { mutableStateOf(false) }
+    val contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "本周有 ${changes.size} 处课表变化",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor,
+                maxLines = 2,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(
+                    text = if (expanded) "收起" else "查看",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = contentColor
+                )
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "忽略课表变化",
+                    tint = contentColor,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+        if (expanded) {
+            changes.take(8).forEach { change ->
+                Text(
+                    text = "• ${describeCourseChange(change)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = contentColor,
+                    modifier = Modifier.padding(start = 26.dp, end = 8.dp, bottom = 3.dp)
+                )
+            }
+            if (changes.size > 8) {
+                Text(
+                    text = "…还有 ${changes.size - 8} 处",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = contentColor,
+                    modifier = Modifier.padding(start = 26.dp, bottom = 2.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+private fun describeCourseChange(change: CourseChange): String {
+    val day = WEEKDAY_NAMES.getOrNull(change.weekday - 1) ?: "周${change.weekday}"
+    val course = change.newCourse ?: change.oldCourse
+    val period = course?.let {
+        if (it.startPeriod == it.endPeriod) {
+            "第${it.startPeriod}节"
+        } else {
+            "第${it.startPeriod}-${it.endPeriod}节"
+        }
+    }.orEmpty()
+    return when (change.kind) {
+        CourseChangeKind.ADDED -> listOfNotNull(
+            "新增",
+            day,
+            period.takeIf { it.isNotBlank() },
+            change.courseName,
+            course?.classroom?.takeIf { it.isNotBlank() },
+            course?.teacher?.takeIf { it.isNotBlank() }
+        ).joinToString(" · ")
+
+        CourseChangeKind.REMOVED -> listOfNotNull(
+            "移出",
+            day,
+            period.takeIf { it.isNotBlank() },
+            change.courseName
+        ).joinToString(" · ")
+
+        CourseChangeKind.UPDATED -> "$day ${change.courseName}：" +
+            change.details.joinToString("；")
     }
 }
 

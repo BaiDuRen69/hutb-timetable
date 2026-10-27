@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.hutb.timetable.data.model.AuthSession
+import com.hutb.timetable.core.CourseChange
 import com.hutb.timetable.core.HutbError
 import com.hutb.timetable.core.RoomOption
 import com.hutb.timetable.core.RoomSortMode
@@ -11,6 +12,7 @@ import com.hutb.timetable.core.ScheduleFilter
 import com.hutb.timetable.core.ScheduleQuery
 import com.hutb.timetable.core.Semester
 import com.hutb.timetable.core.WeekSchedule
+import com.hutb.timetable.core.diffCourses
 import com.hutb.timetable.core.resolveBuildingName
 import com.hutb.timetable.core.scopeToBuilding
 import com.hutb.timetable.data.local.AppSettings
@@ -48,7 +50,9 @@ data class ScheduleState(
      * 网络失败且本周没有缓存时，该分区最近一次缓存所在周次。
      * 仅用于提示"第 N 周有缓存，点此查看"，绝不把别的周次当当前周渲染。
      */
-    val staleCacheWeek: Int? = null
+    val staleCacheWeek: Int? = null,
+    /** 本次刷新相对上一版个人课表的变化；只在同一学期/周次内比较 */
+    val changes: List<CourseChange> = emptyList()
 )
 
 /**
@@ -419,6 +423,19 @@ class TimetableViewModel(
             roomMode = isRoomMode
         )
 
+        // 只有同一学期/周次、同为个人课表时才有可比性；换周/换教室不提示变化
+        val previousForDiff = if (isRoomMode) {
+            null
+        } else {
+            scheduleState.data?.takeIf {
+                it.semesterId == query.semesterId &&
+                    it.week == query.week &&
+                    it.roomLabel.isBlank()
+            }
+        }
+        // 新查询开始时收起上一轮的变化提示，成功后再按结果重新填
+        _uiState.update { it.copy(schedule = it.schedule.copy(changes = emptyList())) }
+
         scheduleJob?.cancel()
         scheduleJob = viewModelScope.launch {
             // 没有活动会话或会话已失效：只读缓存，不再白打一次网络请求
@@ -454,13 +471,19 @@ class TimetableViewModel(
             result.onSuccess { schedule ->
                 loadedQuery = query
                 repository.rememberPosition(schedule.semesterId, schedule.week)
+                val changes = if (previousForDiff != null && !schedule.isFromCache) {
+                    diffCourses(previousForDiff.courses, schedule.courses)
+                } else {
+                    emptyList()
+                }
                 _uiState.update {
                     it.copy(
                         schedule = it.schedule.copy(
                             loading = false,
                             data = schedule,
                             fromCache = schedule.isFromCache,
-                            staleCacheWeek = null
+                            staleCacheWeek = null,
+                            changes = changes
                         ),
                         session = it.session.copy(errorMessage = null, expired = false)
                     )
@@ -932,6 +955,11 @@ class TimetableViewModel(
      */
     fun updateFilter(filter: ScheduleFilter) {
         _uiState.update { it.copy(schedule = it.schedule.copy(filter = filter)) }
+    }
+
+    /** 用户主动忽略本轮课表变化；下一次刷新成功后才可能再次出现。 */
+    fun dismissChanges() {
+        _uiState.update { it.copy(schedule = it.schedule.copy(changes = emptyList())) }
     }
 
     /** 切换教室名精简显示，并记住偏好。 */
