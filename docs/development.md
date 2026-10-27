@@ -82,7 +82,7 @@ tasks.register('unitTest', JavaExec) {
 
 ```bash
 ./gradlew :core:unitTest --console=plain
-# 输出：JUnit version 4.13.2 / OK (133 tests)
+# 输出：JUnit version 4.13.2 / OK (139 tests)
 ```
 
 > 注意：Gradle 9 的 `JavaExec` **没有公开的 `argsProvider` setter**，
@@ -121,7 +121,7 @@ export ANDROID_HOME="C:\Users\bai\AppData\Local\Android\Sdk"
 
 ```bash
 ./gradlew :core:unitTest --console=plain
-# → JUnit version 4.13.2 / OK (133 tests)
+# → JUnit version 4.13.2 / OK (139 tests)
 ```
 
 （中文路径下的注意事项见上文「⚠️ 中文路径下的单元测试」）

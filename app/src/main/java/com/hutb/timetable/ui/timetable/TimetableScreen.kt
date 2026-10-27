@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.EventBusy
@@ -120,6 +121,7 @@ fun TimetableScreen(
     var showWeekDialog by rememberSaveable { mutableStateOf(false) }
     var showFilterSheet by rememberSaveable { mutableStateOf(false) }
     var showOverflow by remember { mutableStateOf(false) }
+    var showSearch by rememberSaveable { mutableStateOf(false) }
     // 教室模式下"只看空教室"的开关（纯展示层状态，不进 ViewModel）
     var emptyRoomsOnly by rememberSaveable { mutableStateOf(false) }
     // 从"现在/下一节空教室"进入后，跨节次自动更新筛选
@@ -459,6 +461,15 @@ fun TimetableScreen(
                                 onClick = {
                                     showOverflow = false
                                     onOpenSettings()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("搜索课程") },
+                                leadingIcon = { Icon(Icons.Default.Search, null) },
+                                enabled = state.schedule.data?.courses?.isNotEmpty() == true,
+                                onClick = {
+                                    showOverflow = false
+                                    showSearch = true
                                 }
                             )
                             DropdownMenuItem(
@@ -803,6 +814,20 @@ fun TimetableScreen(
                 }
             }
         }
+    }
+
+    // 本周课程搜索（只查已加载的课表，不联网）
+    if (showSearch) {
+        CourseSearchDialog(
+            courses = state.schedule.data?.courses.orEmpty(),
+            timetable = state.timetable,
+            week = state.schedule.currentWeek,
+            onDismiss = { showSearch = false },
+            onSelect = { course ->
+                showSearch = false
+                selectedCourse = course
+            }
+        )
     }
 
     // 课程详情
