@@ -29,8 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.material3.MaterialTheme
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hutb.timetable.HutbApp
+import com.hutb.timetable.data.NetworkStatus
 import com.hutb.timetable.data.model.AuthSession
 import com.hutb.timetable.data.remote.PageSnapshot
 import com.hutb.timetable.notify.DailySummaryScheduler
@@ -133,6 +136,17 @@ class MainActivity : ComponentActivity() {
                     state.timetable
                 ) {
                     TodayWidgetProvider.requestUpdate(this@MainActivity)
+                }
+
+                // 回到前台且停留在当前周时，静默刷新过期数据；
+                // 网络是否允许由设置（仅 Wi-Fi）决定，未登录/查看其他周不会触发
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                    vm.autoSyncIfStale(
+                        networkAllowed = NetworkStatus.autoSyncAllowed(
+                            this@MainActivity,
+                            container.settings.autoSyncWifiOnly
+                        )
+                    )
                 }
 
                 // 显式的"是否展示登录页"状态：初值取决于本地是否已有会话，
@@ -335,6 +349,7 @@ class MainActivity : ComponentActivity() {
                                 onBack = { showSettings = false },
                                 onChanged = { vm.reloadSettings() },
                                 secureStorage = container.credentials.secureStorage,
+                                lastSyncAtMillis = state.schedule.data?.cachedAt ?: 0L,
                                 onClearLocalData = {
                                     vm.clearLocalData()
                                     Toast.makeText(

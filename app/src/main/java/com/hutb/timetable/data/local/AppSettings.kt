@@ -206,6 +206,16 @@ class AppSettings(context: Context) {
             .putInt(KEY_QUIET_END, value.coerceIn(0, MINUTES_PER_DAY - 1))
             .apply()
 
+    /** 是否在回到 App 时自动同步当前周个人课表。 */
+    var autoSyncEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_SYNC_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_SYNC_ENABLED, value).apply()
+
+    /** 自动同步是否只在非计费网络（通常是 Wi-Fi）下进行。 */
+    var autoSyncWifiOnly: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_SYNC_WIFI_ONLY, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_SYNC_WIFI_ONLY, value).apply()
+
     private fun keyStart(semesterId: String): String = "$KEY_SEMESTER_START_PREFIX$semesterId"
 
     fun newTimetableId(): String =
@@ -267,6 +277,8 @@ class AppSettings(context: Context) {
         private const val KEY_QUIET_HOURS_ENABLED = "quiet_hours_enabled"
         private const val KEY_QUIET_START = "quiet_hours_start"
         private const val KEY_QUIET_END = "quiet_hours_end"
+        private const val KEY_AUTO_SYNC_ENABLED = "auto_sync_enabled"
+        private const val KEY_AUTO_SYNC_WIFI_ONLY = "auto_sync_wifi_only"
 
         private const val MINUTES_PER_DAY = 24 * 60
 

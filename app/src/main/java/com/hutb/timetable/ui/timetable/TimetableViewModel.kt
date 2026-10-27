@@ -13,6 +13,7 @@ import com.hutb.timetable.core.ScheduleQuery
 import com.hutb.timetable.core.Semester
 import com.hutb.timetable.core.WeekSchedule
 import com.hutb.timetable.core.diffCourses
+import com.hutb.timetable.core.isAutoSyncDue
 import com.hutb.timetable.core.resolveBuildingName
 import com.hutb.timetable.core.scopeToBuilding
 import com.hutb.timetable.data.local.AppSettings
@@ -126,6 +127,9 @@ class TimetableViewModel(
 
     /** 当前课表查询任务；新查询启动时取消旧查询，避免慢响应覆盖新数据。 */
     private var scheduleJob: Job? = null
+
+    /** 上次自动同步尝试时间，避免每次回到 App 都请求。 */
+    private var lastAutoSyncAttemptAt = 0L
 
     /** 教室选择器的预览请求；快速切换校区时只保留最后一次。 */
     private var previewJob: Job? = null
@@ -392,8 +396,9 @@ class TimetableViewModel(
      * 再请求服务端刷新替换——翻周次 / 重进页面时不再白屏转圈。
      *
      * @param fresh 跳过内存级页面缓存，强制从服务端重新拉取（刷新按钮用）
+     * @param silent 自动同步：不显示加载条、失败不弹错误提示（会话失效仍会标记）
      */
-    fun loadSchedule(fresh: Boolean = false) {
+    fun loadSchedule(fresh: Boolean = false, silent: Boolean = false) {
         val state = _uiState.value
         val scheduleState = state.schedule
         if (scheduleState.currentSemesterId.isBlank()) return
@@ -459,7 +464,7 @@ class TimetableViewModel(
                             schedule = it.schedule.copy(
                                 data = cached,
                                 fromCache = true,
-                                loading = true,
+                                loading = if (silent) it.schedule.loading else true,
                                 staleCacheWeek = null
                             ),
                             session = it.session.copy(errorMessage = null, expired = false)
@@ -469,7 +474,10 @@ class TimetableViewModel(
             }
             _uiState.update {
                 it.copy(
-                    schedule = it.schedule.copy(loading = true, staleCacheWeek = null),
+                    schedule = it.schedule.copy(
+                        loading = if (silent) it.schedule.loading else true,
+                        staleCacheWeek = null
+                    ),
                     session = it.session.copy(errorMessage = null)
                 )
             }
@@ -504,13 +512,48 @@ class TimetableViewModel(
                         session = it.session.copy(
                             expired = expired,
                             loggedIn = !expired,
-                            errorMessage = e.message ?: "课表加载失败"
+                            errorMessage = if (silent) null else {
+                                e.message ?: "课表加载失败"
+                            }
                         )
                     )
                 }
-                if (!expired) offerStaleCache(query)
+                if (!expired && !silent) offerStaleCache(query)
             }
         }
+    }
+
+    /**
+     * 回到 App 时静默刷新当前周个人课表。
+     *
+     * 只在已登录、停在本人当前周、数据超过 [AUTO_SYNC_MIN_AGE_MS] 时触发；
+     * 用户正在查看别的周或教室课表时不打扰。网络条件由调用方先判断。
+     */
+    fun autoSyncIfStale(networkAllowed: Boolean) {
+        val state = _uiState.value
+        val schedule = state.schedule
+        if (!settings.autoSyncEnabled) return
+        if (!networkAllowed) return
+        if (!state.session.loggedIn || state.session.expired) return
+        if (schedule.queryMode != QueryMode.PERSONAL || schedule.loading) return
+        val data = schedule.data ?: return
+        val currentWeek = settings.currentWeekNumber(schedule.currentSemesterId) ?: return
+        if (schedule.currentWeek != currentWeek || data.week != currentWeek) return
+
+        val now = System.currentTimeMillis()
+        if (!isAutoSyncDue(
+                nowMillis = now,
+                cachedAtMillis = data.cachedAt,
+                lastAttemptAtMillis = lastAutoSyncAttemptAt,
+                minAgeMillis = AUTO_SYNC_MIN_AGE_MS,
+                minIntervalMillis = AUTO_SYNC_MIN_INTERVAL_MS
+            )
+        ) {
+            return
+        }
+
+        lastAutoSyncAttemptAt = now
+        loadSchedule(fresh = false, silent = true)
     }
 
     /**
@@ -1081,6 +1124,12 @@ class TimetableViewModel(
     }
 
     companion object {
+        /** 数据超过 15 分钟才自动同步。 */
+        private const val AUTO_SYNC_MIN_AGE_MS = 15 * 60 * 1000L
+
+        /** 两次自动同步尝试至少间隔 5 分钟。 */
+        private const val AUTO_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000L
+
         fun factory(repository: TimetableRepository, settings: AppSettings): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

@@ -83,7 +83,10 @@ import com.hutb.timetable.notify.DailySummaryScheduler
 import com.hutb.timetable.ui.DISCLAIMER_BODY
 import com.hutb.timetable.ui.theme.ThemeMode
 import com.hutb.timetable.ui.theme.ThemeStyle
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * 设置页：当前周次（按学期）+ 主题 + 作息时间表。
@@ -106,6 +109,8 @@ fun SettingsScreen(
     onThemeStyleChange: (ThemeStyle) -> Unit = {},
     /** 凭据是否加密落盘；false 时明确提示用户 */
     secureStorage: Boolean = true,
+    /** 当前显示课表的获取时间（Unix 毫秒），0 表示暂无 */
+    lastSyncAtMillis: Long = 0L,
     /** 清除本地缓存数据（保留登录） */
     onClearLocalData: () -> Unit = {}
 ) {
@@ -139,6 +144,8 @@ fun SettingsScreen(
     var quietHoursEnabled by rememberSaveable { mutableStateOf(settings.quietHoursEnabled) }
     var quietStart by rememberSaveable { mutableStateOf(settings.quietHoursStartMinutes) }
     var quietEnd by rememberSaveable { mutableStateOf(settings.quietHoursEndMinutes) }
+    var autoSyncEnabled by rememberSaveable { mutableStateOf(settings.autoSyncEnabled) }
+    var autoSyncWifiOnly by rememberSaveable { mutableStateOf(settings.autoSyncWifiOnly) }
     var notificationsAllowed by remember { mutableStateOf(DailySummaryNotifier.canPost(context)) }
     var showNotificationDenied by rememberSaveable { mutableStateOf(false) }
 
@@ -396,6 +403,41 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
+
+        // ---- 数据同步 ----
+        SectionCard(title = "数据同步") {
+            SettingSwitchRow(
+                title = "回到 App 自动同步本周",
+                subtitle = "停在当前周时静默刷新个人课表；查看其他周不会触发",
+                checked = autoSyncEnabled,
+                onCheckedChange = { enabled ->
+                    autoSyncEnabled = enabled
+                    settings.autoSyncEnabled = enabled
+                }
+            )
+            if (autoSyncEnabled) {
+                SettingSwitchRow(
+                    title = "仅在 Wi-Fi 下自动同步",
+                    subtitle = "移动网络下不自动请求；手动刷新不受限制",
+                    checked = autoSyncWifiOnly,
+                    onCheckedChange = { enabled ->
+                        autoSyncWifiOnly = enabled
+                        settings.autoSyncWifiOnly = enabled
+                    }
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "当前数据同步：${formatLastSyncTime(lastSyncAtMillis)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "数据超过 15 分钟才会在回到 App 时自动同步；启动时的正常刷新不受影响。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         // ---- 主题 ----
@@ -812,6 +854,18 @@ private fun SettingClickRow(
 
 private fun formatMinuteOfDay(minutes: Int): String =
     "%02d:%02d".format(minutes / 60, minutes % 60)
+
+private fun formatLastSyncTime(cachedAtMillis: Long): String {
+    if (cachedAtMillis <= 0L) return "暂无记录"
+    val time = Instant.ofEpochMilli(cachedAtMillis).atZone(ZoneId.systemDefault())
+    val today = LocalDate.now()
+    val day = when (time.toLocalDate()) {
+        today -> "今天"
+        today.minusDays(1) -> "昨天"
+        else -> time.format(DateTimeFormatter.ofPattern("MM-dd"))
+    }
+    return "$day ${time.format(DateTimeFormatter.ofPattern("HH:mm"))}"
+}
 
 private fun openNotificationSettings(context: Context) {
     val intent = Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)

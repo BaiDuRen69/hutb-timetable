@@ -64,7 +64,7 @@ class TimetableRepository(
                 api.fetchSchedule(query)
             }
             putCache(schedule, query.cacheScope)
-            Result.success(schedule)
+            Result.success(schedule.copy(cachedAt = System.currentTimeMillis()))
         } catch (e: HutbError) {
             if (e is HutbError.NotLoggedIn) {
                 // 会话失效：清掉本地会话凭据，但保留课表缓存供离线查看
@@ -440,6 +440,7 @@ class TimetableRepository(
         semesterName = semesterName,
         week = week,
         courses = runCatching { decodeCourses(payload) }.getOrDefault(emptyList()),
-        isFromCache = true
+        isFromCache = true,
+        cachedAt = cachedAt
     )
 }

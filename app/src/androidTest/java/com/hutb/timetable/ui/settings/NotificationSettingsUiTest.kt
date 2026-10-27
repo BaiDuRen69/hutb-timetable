@@ -34,5 +34,8 @@ class NotificationSettingsUiTest {
 
         compose.onNodeWithText("每日课程提醒").assertExists()
         compose.onNodeWithText("每日课程摘要").assertExists()
+        compose.onNodeWithText("数据同步").assertExists()
+        compose.onNodeWithText("回到 App 自动同步本周").assertExists()
+        compose.onNodeWithText("当前数据同步：暂无记录").assertExists()
     }
 }

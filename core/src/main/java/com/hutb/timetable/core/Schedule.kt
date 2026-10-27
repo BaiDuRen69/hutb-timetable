@@ -49,7 +49,9 @@ data class WeekSchedule(
     /** 教室查询时的范围描述，如「至诚楼 A201」；个人课表为空 */
     val roomLabel: String = "",
     /** 解析过程中无法归位的行（教务系统改版时用于暴露问题） */
-    val parseIssues: List<ParseIssue> = emptyList()
+    val parseIssues: List<ParseIssue> = emptyList(),
+    /** 这份课表的获取时间（Unix 毫秒）；0 表示未知（旧缓存/测试数据） */
+    val cachedAt: Long = 0L
 ) {
     /** 按星期 + 起始节次排序，便于网格渲染。 */
     val sorted: List<Course>

@@ -74,7 +74,9 @@ import com.hutb.timetable.core.CourseChange
 import com.hutb.timetable.core.CourseChangeKind
 import com.hutb.timetable.core.RoomSortMode
 import com.hutb.timetable.core.ScheduleFilter
+import com.hutb.timetable.core.WeekSchedule
 import com.hutb.timetable.core.computeCurrentWeek
+import com.hutb.timetable.core.formatSyncAge
 import com.hutb.timetable.core.roomIdentity
 import com.hutb.timetable.core.sortRoomLabels
 import com.hutb.timetable.data.local.ClassTimetable
@@ -413,9 +415,9 @@ fun TimetableScreen(
                                     }
                                 }
                                 if (state.schedule.fromCache) {
-                                    // 数据层只返回与请求周次一致的缓存，
-                                    // "第 N 周缓存"是死分支，统一显示"本地缓存"
-                                    CacheBadge(text = "本地缓存")
+                                    // 数据层只返回与请求周次一致的缓存；
+                                    // 附带缓存年龄，让用户知道这份课表有多旧
+                                    CacheBadge(text = cacheBadgeText(state.schedule.data))
                                 }
                                 if (BuildConfig.DEBUG) {
                                     val issueCount = state.schedule.data?.parseIssues?.size ?: 0
@@ -1184,6 +1186,12 @@ private fun NowEmptyRoomsBar(
 }
 
 /** 顶栏副标题里的缓存标签。 */
+private fun cacheBadgeText(data: WeekSchedule?): String {
+    val cachedAt = data?.cachedAt ?: 0L
+    val age = formatSyncAge(cachedAt, System.currentTimeMillis())
+    return if (age == null) "本地缓存" else "本地缓存 · $age"
+}
+
 @Composable
 private fun CacheBadge(text: String) {
     Text(
