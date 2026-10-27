@@ -33,6 +33,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hutb.timetable.HutbApp
 import com.hutb.timetable.data.model.AuthSession
 import com.hutb.timetable.data.remote.PageSnapshot
+import com.hutb.timetable.notify.DailySummaryScheduler
 import com.hutb.timetable.ui.login.LoginScreen
 import com.hutb.timetable.ui.login.WebLoginActivity
 import com.hutb.timetable.ui.settings.SettingsScreen
@@ -102,6 +103,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val container = (application as HutbApp).container
+        // 被强行停止/清理后系统闹钟会丢失，每次打开 App 重排一次
+        DailySummaryScheduler.reschedule(this)
         // 旋转重建时不重放旧动作；只有从快捷方式冷启动才读取
         if (savedInstanceState == null) {
             shortcutAction.value = intent?.getStringExtra(EXTRA_SHORTCUT_ACTION)
@@ -370,6 +373,10 @@ class MainActivity : ComponentActivity() {
                                 CookieManager.getInstance().removeAllCookies(null)
                                 CookieManager.getInstance().flush()
                                 pendingRoomMode = false
+                                // 主动退出后不再推送上一个账号的摘要；
+                                // 会话自然过期不走这里，仍可用本地缓存提醒
+                                container.settings.dailySummaryEnabled = false
+                                DailySummaryScheduler.reschedule(this@MainActivity)
                                 vm.logout(clearOffline)
                                 showLogin = true
                             },

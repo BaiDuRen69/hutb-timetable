@@ -1,7 +1,15 @@
 package com.hutb.timetable.ui.settings
 
+import android.Manifest
+import android.app.TimePickerDialog
+import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.provider.Settings as AndroidSettings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,15 +64,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.hutb.timetable.BuildConfig
 import com.hutb.timetable.core.computeCurrentWeek
+import com.hutb.timetable.core.isWithinQuietHours
 import com.hutb.timetable.core.semesterStartForWeek
 import com.hutb.timetable.data.local.AppSettings
 import com.hutb.timetable.data.local.ClassTimetable
 import com.hutb.timetable.data.local.PeriodTime
+import com.hutb.timetable.notify.DailySummaryNotifier
+import com.hutb.timetable.notify.DailySummaryScheduler
 import com.hutb.timetable.ui.DISCLAIMER_BODY
 import com.hutb.timetable.ui.theme.ThemeMode
 import com.hutb.timetable.ui.theme.ThemeStyle
@@ -111,6 +129,66 @@ fun SettingsScreen(
     val currentWeek = if (startDate.isBlank()) null else computeCurrentWeek(startDate, LocalDate.now())
     // 没有选中学期时无处归属，先禁止编辑，避免把周次存到空键上
     val canEditStartDate = semesterId.isNotBlank()
+
+    val context = LocalContext.current
+    var dailySummaryEnabled by rememberSaveable { mutableStateOf(settings.dailySummaryEnabled) }
+    var summaryMinutes by rememberSaveable { mutableStateOf(settings.dailySummaryMinutes) }
+    var notifyWithoutCourses by rememberSaveable {
+        mutableStateOf(settings.dailySummaryNotifyWithoutCourses)
+    }
+    var quietHoursEnabled by rememberSaveable { mutableStateOf(settings.quietHoursEnabled) }
+    var quietStart by rememberSaveable { mutableStateOf(settings.quietHoursStartMinutes) }
+    var quietEnd by rememberSaveable { mutableStateOf(settings.quietHoursEndMinutes) }
+    var notificationsAllowed by remember { mutableStateOf(DailySummaryNotifier.canPost(context)) }
+    var showNotificationDenied by rememberSaveable { mutableStateOf(false) }
+
+    // 从系统设置返回后重新检查，用户可能刚关掉/打开通知权限
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notificationsAllowed = DailySummaryNotifier.canPost(context)
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            dailySummaryEnabled = true
+            settings.dailySummaryEnabled = true
+            notificationsAllowed = DailySummaryNotifier.canPost(context)
+            DailySummaryNotifier.ensureChannel(context)
+            DailySummaryScheduler.reschedule(context)
+        } else {
+            showNotificationDenied = true
+        }
+    }
+
+    fun pickTime(initialMinutes: Int, onPicked: (Int) -> Unit) {
+        TimePickerDialog(
+            context,
+            { _, hour, minute -> onPicked(hour * 60 + minute) },
+            initialMinutes / 60,
+            initialMinutes % 60,
+            true
+        ).show()
+    }
+
+    fun setDailySummaryEnabled(enabled: Boolean) {
+        if (!enabled) {
+            dailySummaryEnabled = false
+            settings.dailySummaryEnabled = false
+            DailySummaryScheduler.reschedule(context)
+            return
+        }
+        val needsPermission = !DailySummaryNotifier.hasPermission(context)
+        if (needsPermission) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            dailySummaryEnabled = true
+            settings.dailySummaryEnabled = true
+            notificationsAllowed = DailySummaryNotifier.canPost(context)
+            DailySummaryNotifier.ensureChannel(context)
+            DailySummaryScheduler.reschedule(context)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -189,6 +267,132 @@ fun SettingsScreen(
                 ) {
                     TextButton(onClick = { showStartDateEditor = true }) {
                         Text("直接填写第一周周一", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
+        // ---- 每日课程提醒 ----
+        SectionCard(title = "每日课程提醒") {
+            SettingSwitchRow(
+                title = "每日课程摘要",
+                subtitle = "按本地课表汇总当天课程；需先同步本周课表，不联网。",
+                checked = dailySummaryEnabled,
+                onCheckedChange = ::setDailySummaryEnabled
+            )
+            if (dailySummaryEnabled) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                )
+                SettingClickRow(
+                    title = "提醒时间",
+                    subtitle = "每天在此时刻发送当天课程",
+                    value = formatMinuteOfDay(summaryMinutes),
+                    onClick = {
+                        pickTime(summaryMinutes) { minutes ->
+                            summaryMinutes = minutes
+                            settings.dailySummaryMinutes = minutes
+                            DailySummaryScheduler.reschedule(context)
+                        }
+                    }
+                )
+                SettingSwitchRow(
+                    title = "没课时仍然提醒",
+                    subtitle = "关闭后，当天没有课程时不发送通知",
+                    checked = notifyWithoutCourses,
+                    onCheckedChange = { enabled ->
+                        notifyWithoutCourses = enabled
+                        settings.dailySummaryNotifyWithoutCourses = enabled
+                    }
+                )
+                SettingSwitchRow(
+                    title = "免打扰时段",
+                    subtitle = "该时段内不发送课程摘要，可跨午夜",
+                    checked = quietHoursEnabled,
+                    onCheckedChange = { enabled ->
+                        quietHoursEnabled = enabled
+                        settings.quietHoursEnabled = enabled
+                    }
+                )
+                if (quietHoursEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                pickTime(quietStart) { minutes ->
+                                    quietStart = minutes
+                                    settings.quietHoursStartMinutes = minutes
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            Text(formatMinuteOfDay(quietStart))
+                        }
+                        Text(
+                            text = "至",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                pickTime(quietEnd) { minutes ->
+                                    quietEnd = minutes
+                                    settings.quietHoursEndMinutes = minutes
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            Text(formatMinuteOfDay(quietEnd))
+                        }
+                    }
+                }
+                val reminderInQuietHours = quietHoursEnabled &&
+                    isWithinQuietHours(summaryMinutes, quietStart, quietEnd)
+                Text(
+                    text = if (reminderInQuietHours) {
+                        "提醒时间落在免打扰时段内，当前不会发送。"
+                    } else {
+                        "提醒依赖系统闹钟，省电策略下可能延迟几分钟。"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (reminderInQuietHours) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                if (!notificationsAllowed) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "系统通知权限未开启，提醒无法送达。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(onClick = { openNotificationSettings(context) }) {
+                        Text("去系统设置开启")
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = {
+                        val sent = DailySummaryNotifier.postTest(context)
+                        Toast.makeText(
+                            context,
+                            if (sent) "已发送测试通知" else "通知权限未开启，无法发送测试通知",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }) {
+                        Text("发送测试通知", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -432,6 +636,25 @@ fun SettingsScreen(
         SponsorDialog(onDismiss = { showSponsor = false })
     }
 
+    if (showNotificationDenied) {
+        AlertDialog(
+            onDismissRequest = { showNotificationDenied = false },
+            title = { Text("需要通知权限") },
+            text = {
+                Text("每日课程摘要需要系统通知权限才能送达。可在系统设置中为本应用开启通知。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showNotificationDenied = false
+                    openNotificationSettings(context)
+                }) { Text("去设置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotificationDenied = false }) { Text("取消") }
+            }
+        )
+    }
+
     if (showWeekPicker) {
         // 用户只选"今天是第几周"，由 App 反推第一周周一
         var selectedWeek by remember { mutableStateOf(currentWeek ?: 1) }
@@ -529,6 +752,72 @@ fun SettingsScreen(
             }
         )
     }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun SettingClickRow(
+    title: String,
+    subtitle: String,
+    value: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+private fun formatMinuteOfDay(minutes: Int): String =
+    "%02d:%02d".format(minutes / 60, minutes % 60)
+
+private fun openNotificationSettings(context: Context) {
+    val intent = Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable

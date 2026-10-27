@@ -9,10 +9,9 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.RemoteViews
-import com.hutb.timetable.HutbApp
 import com.hutb.timetable.R
-import com.hutb.timetable.core.ScheduleQuery
 import com.hutb.timetable.data.local.ClassTimetable
+import com.hutb.timetable.data.repo.loadLocalTodaySchedule
 import com.hutb.timetable.ui.MainActivity
 import com.hutb.timetable.ui.timetable.TodayCourseStatus
 import com.hutb.timetable.ui.timetable.computeTodayCourseStatus
@@ -96,36 +95,18 @@ class TodayWidgetProvider : AppWidgetProvider() {
         }
 
         private suspend fun loadSnapshot(context: Context): WidgetSnapshot {
-            val container = (context.applicationContext as? HutbApp)?.container
-                ?: return WidgetSnapshot()
-            val repository = container.repository
-            val settings = container.settings
-
-            var semesterId = repository.lastSemesterId
-            if (semesterId.isBlank()) {
-                semesterId = repository.readSemestersCache().firstOrNull()?.id.orEmpty()
-            }
-            if (semesterId.isBlank()) return WidgetSnapshot()
-
-            val week = settings.currentWeekNumber(semesterId)
-                ?: repository.lastWeek.takeIf { it in 1..30 }
-                ?: 1
-            val query = ScheduleQuery(semesterId = semesterId, week = week)
-            val exact = repository.readExactCache(query)
-            val schedule = exact ?: repository.readLatestCache(query)
-                ?: return WidgetSnapshot()
-
+            val local = loadLocalTodaySchedule(context) ?: return WidgetSnapshot()
             val status = computeTodayCourseStatus(
-                courses = schedule.courses,
-                timetable = settings.activeTimetable,
+                courses = local.courses,
+                timetable = local.timetable,
                 now = LocalDateTime.now()
             )
             return WidgetSnapshot(
                 loaded = true,
-                week = schedule.week,
+                week = local.week,
                 status = status,
-                timetable = settings.activeTimetable,
-                currentWeekOnly = exact != null
+                timetable = local.timetable,
+                currentWeekOnly = local.currentWeekOnly
             )
         }
 

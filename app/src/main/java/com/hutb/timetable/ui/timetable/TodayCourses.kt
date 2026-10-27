@@ -20,33 +20,44 @@ internal data class TodayCourseStatus(
     val remaining: List<Course> = emptyList()
 )
 
+internal data class TodayCourseEntry(
+    val course: Course,
+    val range: IntRange
+)
+
 internal fun computeTodayCourseStatus(
     courses: List<Course>,
     timetable: ClassTimetable?,
     now: LocalDateTime
 ): TodayCourseStatus {
-    val today = now.dayOfWeek.value
     val nowMinutes = now.hour * 60 + now.minute
-    val todayCourses = courses
-        .asSequence()
-        .filter { it.weekday == today }
-        .mapNotNull { course ->
-            courseRangeMinutes(timetable, course)?.let { course to it }
-        }
-        .sortedBy { it.second.first }
-        .toList()
-    val current = todayCourses.firstOrNull { nowMinutes in it.second }
-    val next = todayCourses.firstOrNull { it.second.first > nowMinutes }
+    val todayCourses = courseEntriesForDay(courses, timetable, now.dayOfWeek.value)
+    val current = todayCourses.firstOrNull { nowMinutes in it.range }
+    val next = todayCourses.firstOrNull { it.range.first > nowMinutes }
     return TodayCourseStatus(
         todayCount = todayCourses.size,
         nowMinutes = nowMinutes,
-        current = current?.first,
-        currentRange = current?.second,
-        next = next?.first,
-        nextRange = next?.second,
-        remaining = todayCourses.filter { it.second.last >= nowMinutes }.map { it.first }
+        current = current?.course,
+        currentRange = current?.range,
+        next = next?.course,
+        nextRange = next?.range,
+        remaining = todayCourses.filter { it.range.last >= nowMinutes }.map { it.course }
     )
 }
+
+/** 指定星期几的课程，按上课时间排序；没有可用作息的课程会被跳过。 */
+internal fun courseEntriesForDay(
+    courses: List<Course>,
+    timetable: ClassTimetable?,
+    weekday: Int
+): List<TodayCourseEntry> = courses
+    .asSequence()
+    .filter { it.weekday == weekday }
+    .mapNotNull { course ->
+        courseRangeMinutes(timetable, course)?.let { TodayCourseEntry(course, it) }
+    }
+    .sortedBy { it.range.first }
+    .toList()
 
 internal fun courseRangeMinutes(timetable: ClassTimetable?, course: Course): IntRange? {
     if (timetable == null) return null

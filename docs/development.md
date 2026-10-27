@@ -11,6 +11,8 @@
   - `data/remote/`：OkHttp 封装、教务接口、页面快照
   - `data/local/`：课表缓存、凭据（`CredentialStore`）、偏好（`AppPrefs`）、选项缓存
   - `data/repo/`：网络 + 缓存编排
+  - `notify/`：每日课程摘要通知、闹钟与开机重排（只读本地缓存）
+  - `widget/`：今日课表桌面小组件（RemoteViews，只读本地缓存）
   - `ui/timetable/`、`ui/login/`、`ui/settings/`、`ui/theme/`
 - `docs/`：`protocol-facts.md`（协议实测事实）、`development.md`（本文件）
 
@@ -80,7 +82,7 @@ tasks.register('unitTest', JavaExec) {
 
 ```bash
 ./gradlew :core:unitTest --console=plain
-# 输出：JUnit version 4.13.2 / OK (128 tests)
+# 输出：JUnit version 4.13.2 / OK (133 tests)
 ```
 
 > 注意：Gradle 9 的 `JavaExec` **没有公开的 `argsProvider` setter**，
@@ -119,7 +121,7 @@ export ANDROID_HOME="C:\Users\bai\AppData\Local\Android\Sdk"
 
 ```bash
 ./gradlew :core:unitTest --console=plain
-# → JUnit version 4.13.2 / OK (107 tests)
+# → JUnit version 4.13.2 / OK (133 tests)
 ```
 
 （中文路径下的注意事项见上文「⚠️ 中文路径下的单元测试」）

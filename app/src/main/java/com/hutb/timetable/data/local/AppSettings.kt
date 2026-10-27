@@ -169,6 +169,43 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_DISCLAIMER_ACKNOWLEDGED, false)
         set(value) = prefs.edit().putBoolean(KEY_DISCLAIMER_ACKNOWLEDGED, value).apply()
 
+    /** 是否启用每日课程摘要通知。 */
+    var dailySummaryEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DAILY_SUMMARY_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_DAILY_SUMMARY_ENABLED, value).apply()
+
+    /** 每日摘要的发送时刻，距当天 00:00 的分钟数。 */
+    var dailySummaryMinutes: Int
+        get() = prefs.getInt(KEY_DAILY_SUMMARY_MINUTES, DEFAULT_SUMMARY_MINUTES)
+            .coerceIn(0, MINUTES_PER_DAY - 1)
+        set(value) = prefs.edit()
+            .putInt(KEY_DAILY_SUMMARY_MINUTES, value.coerceIn(0, MINUTES_PER_DAY - 1))
+            .apply()
+
+    /** 当天没有课程时是否仍发送摘要。 */
+    var dailySummaryNotifyWithoutCourses: Boolean
+        get() = prefs.getBoolean(KEY_SUMMARY_WITHOUT_COURSES, false)
+        set(value) = prefs.edit().putBoolean(KEY_SUMMARY_WITHOUT_COURSES, value).apply()
+
+    /** 是否启用免打扰时段（该时段内不发送摘要）。 */
+    var quietHoursEnabled: Boolean
+        get() = prefs.getBoolean(KEY_QUIET_HOURS_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_QUIET_HOURS_ENABLED, value).apply()
+
+    var quietHoursStartMinutes: Int
+        get() = prefs.getInt(KEY_QUIET_START, DEFAULT_QUIET_START)
+            .coerceIn(0, MINUTES_PER_DAY - 1)
+        set(value) = prefs.edit()
+            .putInt(KEY_QUIET_START, value.coerceIn(0, MINUTES_PER_DAY - 1))
+            .apply()
+
+    var quietHoursEndMinutes: Int
+        get() = prefs.getInt(KEY_QUIET_END, DEFAULT_QUIET_END)
+            .coerceIn(0, MINUTES_PER_DAY - 1)
+        set(value) = prefs.edit()
+            .putInt(KEY_QUIET_END, value.coerceIn(0, MINUTES_PER_DAY - 1))
+            .apply()
+
     private fun keyStart(semesterId: String): String = "$KEY_SEMESTER_START_PREFIX$semesterId"
 
     fun newTimetableId(): String =
@@ -223,5 +260,19 @@ class AppSettings(context: Context) {
         private const val KEY_THEME_STYLE = "theme_style"
         private const val KEY_FIRST_LOGIN_COMPLETED = "first_login_completed"
         private const val KEY_DISCLAIMER_ACKNOWLEDGED = "disclaimer_acknowledged"
+
+        private const val KEY_DAILY_SUMMARY_ENABLED = "daily_summary_enabled"
+        private const val KEY_DAILY_SUMMARY_MINUTES = "daily_summary_minutes"
+        private const val KEY_SUMMARY_WITHOUT_COURSES = "daily_summary_without_courses"
+        private const val KEY_QUIET_HOURS_ENABLED = "quiet_hours_enabled"
+        private const val KEY_QUIET_START = "quiet_hours_start"
+        private const val KEY_QUIET_END = "quiet_hours_end"
+
+        private const val MINUTES_PER_DAY = 24 * 60
+
+        /** 默认 07:20：早课前汇总当天课程。 */
+        private const val DEFAULT_SUMMARY_MINUTES = 7 * 60 + 20
+        private const val DEFAULT_QUIET_START = 22 * 60
+        private const val DEFAULT_QUIET_END = 7 * 60
     }
 }

@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".HutbApp"
@@ -50,6 +52,23 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_today_info" />
+        </receiver>
+
+        <!-- 每日课程摘要；只读本地缓存，不联网 -->
+        <receiver
+            android:name=".notify.DailySummaryReceiver"
+            android:exported="false" />
+
+        <!-- 重启/改时间/更新后重排每日摘要闹钟 -->
+        <receiver
+            android:name=".notify.BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
         </receiver>
 
     </application>
