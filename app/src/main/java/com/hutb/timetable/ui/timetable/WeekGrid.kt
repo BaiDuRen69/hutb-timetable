@@ -96,11 +96,29 @@ fun WeekGrid(
     modifier: Modifier = Modifier,
     timetable: ClassTimetable? = null,
     /** 当前显示的是否为真实本周；非本周时不显示"今天/现在" */
-    isCurrentWeek: Boolean = true
+    isCurrentWeek: Boolean = true,
+    /** 周视图显示周末；若筛选只选了周末则以筛选为准 */
+    showWeekend: Boolean = true,
+    /** 紧凑周视图：只保留有课的节次 */
+    hideEmptyPeriods: Boolean = false
 ) {
-    val visibleDays = remember(filter) { filter.visibleWeekdays() }
-    val visibleSlots = remember(filter) {
-        PERIOD_SLOTS.filter { it.start <= filter.endPeriod && it.end >= filter.startPeriod }
+    val visibleDays = remember(filter, showWeekend) {
+        val base = filter.visibleWeekdays()
+        val weekdaysOnly = base.filter { it <= 5 }
+        if (showWeekend) base else weekdaysOnly.ifEmpty { base }
+    }
+    val visibleSlots = remember(filter, hideEmptyPeriods, courses, visibleDays) {
+        val base = PERIOD_SLOTS.filter {
+            it.start <= filter.endPeriod && it.end >= filter.startPeriod
+        }
+        if (!hideEmptyPeriods) {
+            base
+        } else {
+            val scoped = filter.apply(courses).filter { it.weekday in visibleDays }
+            base.filter { slot ->
+                scoped.any { it.startPeriod <= slot.end && it.endPeriod >= slot.start }
+            }.ifEmpty { base.take(1) }
+        }
     }
 
     val courseMap = remember(courses, filter, visibleSlots) {

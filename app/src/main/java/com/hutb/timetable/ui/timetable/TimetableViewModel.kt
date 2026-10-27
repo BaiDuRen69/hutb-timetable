@@ -98,7 +98,11 @@ data class TimetableUiState(
     /** 当前生效的作息时间表（决定课表网格上各节次显示的时间） */
     val timetable: ClassTimetable? = null,
     /** 开学日期 "yyyy-MM-dd"，用于推算当前周次；空表示未设置 */
-    val semesterStartDate: String = ""
+    val semesterStartDate: String = "",
+    /** 周视图是否显示周末 */
+    val showWeekend: Boolean = true,
+    /** 周视图是否隐藏无课时段 */
+    val hideEmptyPeriods: Boolean = false
 )
 
 /**
@@ -113,7 +117,9 @@ class TimetableViewModel(
         TimetableUiState(
             shortRoomNames = repository.shortRoomNames,
             roomSortMode = repository.roomSortMode,
-            timetable = settings.activeTimetable
+            timetable = settings.activeTimetable,
+            showWeekend = repository.showWeekend,
+            hideEmptyPeriods = repository.hideEmptyPeriods
         )
     )
     val uiState: StateFlow<TimetableUiState> = _uiState.asStateFlow()
@@ -960,6 +966,18 @@ class TimetableViewModel(
     /** 用户主动忽略本轮课表变化；下一次刷新成功后才可能再次出现。 */
     fun dismissChanges() {
         _uiState.update { it.copy(schedule = it.schedule.copy(changes = emptyList())) }
+    }
+
+    fun toggleShowWeekend() {
+        val next = !_uiState.value.showWeekend
+        repository.showWeekend = next
+        _uiState.update { it.copy(showWeekend = next) }
+    }
+
+    fun toggleHideEmptyPeriods() {
+        val next = !_uiState.value.hideEmptyPeriods
+        repository.hideEmptyPeriods = next
+        _uiState.update { it.copy(hideEmptyPeriods = next) }
     }
 
     /** 切换教室名精简显示，并记住偏好。 */

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ViewDay
+import androidx.compose.material.icons.filled.ViewWeek
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -52,7 +54,11 @@ internal fun HeaderBars(
     onToggleShortNames: () -> Unit,
     onSelectSortMode: (RoomSortMode) -> Unit,
     listMode: Boolean = false,
-    onToggleListMode: () -> Unit = {}
+    onToggleListMode: () -> Unit = {},
+    dayView: Boolean = false,
+    onToggleDayView: () -> Unit = {},
+    onToggleShowWeekend: () -> Unit = {},
+    onToggleHideEmptyPeriods: () -> Unit = {}
 ) {
     var showTools by remember { mutableStateOf(false) }
     val filterActive = state.schedule.filter.isActive
@@ -87,6 +93,17 @@ internal fun HeaderBars(
                         maxLines = 1
                     )
                 }
+            }
+        }
+
+        if (state.schedule.queryMode == QueryMode.PERSONAL) {
+            IconButton(onClick = onToggleDayView) {
+                Icon(
+                    imageVector = if (dayView) Icons.Default.ViewWeek else Icons.Default.ViewDay,
+                    contentDescription = if (dayView) "切换到周视图" else "切换到日视图",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
@@ -125,6 +142,33 @@ internal fun HeaderBars(
                             onToggleListMode()
                         }
                     )
+                }
+                if (state.schedule.queryMode == QueryMode.PERSONAL && !dayView) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(if (state.showWeekend) "隐藏周末" else "✓ 隐藏周末")
+                        },
+                        onClick = {
+                            showTools = false
+                            onToggleShowWeekend()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                if (state.hideEmptyPeriods) {
+                                    "✓ 隐藏无课时段"
+                                } else {
+                                    "隐藏无课时段"
+                                }
+                            )
+                        },
+                        onClick = {
+                            showTools = false
+                            onToggleHideEmptyPeriods()
+                        }
+                    )
+                    HorizontalDivider()
                 }
                 DropdownMenuItem(
                     text = { Text(if (state.shortRoomNames) "✓ 教室名简短" else "教室名完整") },

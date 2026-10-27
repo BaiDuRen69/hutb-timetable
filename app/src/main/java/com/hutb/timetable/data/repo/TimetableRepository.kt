@@ -366,6 +366,20 @@ class TimetableRepository(
             prefs.roomSortMode = value.name
         }
 
+    /** 周视图是否显示周末。 */
+    var showWeekend: Boolean
+        get() = prefs.showWeekend
+        set(value) {
+            prefs.showWeekend = value
+        }
+
+    /** 周视图是否隐藏无课时段。 */
+    var hideEmptyPeriods: Boolean
+        get() = prefs.hideEmptyPeriods
+        set(value) {
+            prefs.hideEmptyPeriods = value
+        }
+
     // ---------------- 序列化 ----------------
 
     /** Course 列表 → JSON 字符串。 */

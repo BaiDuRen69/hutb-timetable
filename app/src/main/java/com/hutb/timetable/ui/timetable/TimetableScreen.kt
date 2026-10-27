@@ -107,7 +107,9 @@ fun TimetableScreen(
     onSelectRoomSortMode: (RoomSortMode) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     onShowNowEmptyRooms: (ScheduleFilter) -> Unit = {},
-    onDismissChanges: () -> Unit = {}
+    onDismissChanges: () -> Unit = {},
+    onToggleShowWeekend: () -> Unit = {},
+    onToggleHideEmptyPeriods: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedCourse by remember { mutableStateOf<Course?>(null) }
@@ -121,6 +123,8 @@ fun TimetableScreen(
     var nowEmptyMode by rememberSaveable { mutableStateOf(false) }
     // 教室模式：Canvas 矩阵 / 线性列表（读屏友好）
     var roomListMode by rememberSaveable { mutableStateOf(false) }
+    // 个人课表：周视图 / 日视图
+    var dayView by rememberSaveable { mutableStateOf(false) }
 
     val context = LocalContext.current
     var pendingIcs by remember { mutableStateOf<String?>(null) }
@@ -525,7 +529,11 @@ fun TimetableScreen(
                 onToggleShortNames = onToggleShortRoomNames,
                 onSelectSortMode = onSelectRoomSortMode,
                 listMode = roomListMode,
-                onToggleListMode = { roomListMode = !roomListMode }
+                onToggleListMode = { roomListMode = !roomListMode },
+                dayView = dayView,
+                onToggleDayView = { dayView = !dayView },
+                onToggleShowWeekend = onToggleShowWeekend,
+                onToggleHideEmptyPeriods = onToggleHideEmptyPeriods
             )
 
             if (state.schedule.queryMode == QueryMode.PERSONAL &&
@@ -721,7 +729,8 @@ fun TimetableScreen(
                             )
                         }
 
-                        visibleCourses.isEmpty() -> {
+                        visibleCourses.isEmpty() &&
+                            !(dayView && state.schedule.queryMode == QueryMode.PERSONAL) -> {
                             EmptyView(
                                 text = "当前筛选条件下没有课程",
                                 icon = Icons.Outlined.FilterAltOff,
@@ -735,17 +744,34 @@ fun TimetableScreen(
                         }
 
                         else -> {
-                            // 个人课表：星期 × 节次网格
-                            WeekGrid(
-                                courses = state.schedule.data.courses,
-                                filter = state.schedule.filter,
-                                onCourseClick = { selectedCourse = it },
-                                modifier = Modifier.fillMaxSize(),
-                                timetable = state.timetable,
-                                // 未设开学日期无法确认今天是第几周，不能画“今天/现在”误导用户
-                                isCurrentWeek = thisWeek != null &&
-                                    thisWeek == state.schedule.currentWeek
-                            )
+                            val currentWeek = thisWeek != null &&
+                                thisWeek == state.schedule.currentWeek
+                            if (dayView) {
+                                DayScheduleView(
+                                    week = state.schedule.currentWeek,
+                                    semesterStartDate = state.semesterStartDate,
+                                    courses = state.schedule.data.courses,
+                                    filter = state.schedule.filter,
+                                    timetable = state.timetable,
+                                    isCurrentWeek = currentWeek,
+                                    onCourseClick = { selectedCourse = it },
+                                    onClearFilter = clearNowFilter,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                // 个人课表：星期 × 节次网格
+                                WeekGrid(
+                                    courses = state.schedule.data.courses,
+                                    filter = state.schedule.filter,
+                                    onCourseClick = { selectedCourse = it },
+                                    modifier = Modifier.fillMaxSize(),
+                                    timetable = state.timetable,
+                                    // 未设开学日期无法确认今天是第几周，不能画“今天/现在”误导用户
+                                    isCurrentWeek = currentWeek,
+                                    showWeekend = state.showWeekend,
+                                    hideEmptyPeriods = state.hideEmptyPeriods
+                                )
+                            }
                         }
                     }
                 }

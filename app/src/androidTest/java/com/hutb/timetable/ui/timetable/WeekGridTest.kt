@@ -20,6 +20,35 @@ class WeekGridTest {
     val compose = createComposeRule()
 
     @Test
+    fun compactWeekHidesWeekendAndEmptySlots() {
+        val course = Course(
+            courseName = "高等数学",
+            teacher = "张老师",
+            classroom = "至诚楼A201",
+            weekday = 1,
+            startPeriod = 1,
+            endPeriod = 2
+        )
+        compose.setContent {
+            HutbTimetableTheme {
+                WeekGrid(
+                    courses = listOf(course),
+                    filter = ScheduleFilter(),
+                    onCourseClick = {},
+                    isCurrentWeek = false,
+                    showWeekend = false,
+                    hideEmptyPeriods = true
+                )
+            }
+        }
+
+        compose.onNodeWithText("周一").assertIsDisplayed()
+        compose.onNodeWithText("周日").assertDoesNotExist()
+        compose.onNodeWithText("第1-2节").assertExists()
+        compose.onNodeWithText("第3-4节").assertDoesNotExist()
+    }
+
+    @Test
     fun threePeriodCourseOnlyAddsOneContinuationCell() {
         val course = Course(
             courseName = "高等数学",

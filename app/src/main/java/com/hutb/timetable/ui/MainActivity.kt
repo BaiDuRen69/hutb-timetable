@@ -234,6 +234,8 @@ class MainActivity : ComponentActivity() {
                         onSelectRoomSortMode = { vm.setRoomSortMode(it) },
                         onShowNowEmptyRooms = { vm.showNowEmptyRooms(it) },
                         onDismissChanges = { vm.dismissChanges() },
+                        onToggleShowWeekend = { vm.toggleShowWeekend() },
+                        onToggleHideEmptyPeriods = { vm.toggleHideEmptyPeriods() },
                         onOpenSettings = { showSettings = true },
                         onShowSnapshots = {
                             snapshots = PageSnapshot.list(this@MainActivity)

@@ -54,6 +54,16 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_ROOM_SORT_MODE, "") ?: ""
         set(value) = prefs.edit().putString(KEY_ROOM_SORT_MODE, value).apply()
 
+    /** 周视图是否显示周六、周日。 */
+    var showWeekend: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_WEEKEND, true)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_WEEKEND, value).apply()
+
+    /** 周视图是否只保留有课的节次（紧凑模式）。 */
+    var hideEmptyPeriods: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_EMPTY_PERIODS, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_EMPTY_PERIODS, value).apply()
+
     /** 最近一次成功解析出学期列表的 HTML 页面路径。 */
     var lastSemesterSourcePath: String
         get() = prefs.getString(KEY_LAST_SEMESTER_PATH, "") ?: ""
@@ -99,6 +109,8 @@ class AppPrefs(context: Context) {
         private const val KEY_LAST_ROOM_CODE = "last_room_code"
         private const val KEY_SHORT_ROOM_NAMES = "short_room_names"
         private const val KEY_ROOM_SORT_MODE = "room_sort_mode"
+        private const val KEY_SHOW_WEEKEND = "show_weekend"
+        private const val KEY_HIDE_EMPTY_PERIODS = "hide_empty_periods"
         private const val KEY_LAST_SEMESTER_PATH = "last_semester_source_path"
         private const val KEY_LAST_ACCOUNT_KEY = "last_account_key"
     }
