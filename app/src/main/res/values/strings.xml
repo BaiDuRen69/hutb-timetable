@@ -22,4 +22,8 @@
     <string name="week_next">下一周</string>
     <string name="semester_switch">切换学期</string>
     <string name="week_switch">切换周次</string>
+
+    <!-- 桌面小组件 -->
+    <string name="widget_today_label">今日课表</string>
+    <string name="widget_today_description">显示今天剩余的课程，只读本地缓存，不发起网络请求</string>
 </resources>

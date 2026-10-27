@@ -41,6 +41,7 @@ import com.hutb.timetable.ui.timetable.SnapshotDialog
 import com.hutb.timetable.ui.timetable.TimetableScreen
 import com.hutb.timetable.ui.timetable.TimetableViewModel
 import com.hutb.timetable.ui.theme.HutbTimetableTheme
+import com.hutb.timetable.widget.TodayWidgetProvider
 import com.hutb.timetable.ui.theme.ThemeMode
 import com.hutb.timetable.ui.theme.ThemeStyle
 import kotlinx.coroutines.delay
@@ -101,6 +102,15 @@ class MainActivity : ComponentActivity() {
                 viewModel = vm
 
                 val state by vm.uiState.collectAsStateWithLifecycle()
+
+                // 课表/周次/作息变化后同步桌面小组件；没有小组件时该调用直接返回
+                LaunchedEffect(
+                    state.schedule.data,
+                    state.schedule.currentWeek,
+                    state.timetable
+                ) {
+                    TodayWidgetProvider.requestUpdate(this@MainActivity)
+                }
 
                 // 显式的"是否展示登录页"状态：初值取决于本地是否已有会话，
                 // 之后只由用户操作（登录成功 / 主动退出）改变，避免重组时来回跳。

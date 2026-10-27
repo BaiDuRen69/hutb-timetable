@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -227,6 +228,11 @@ fun TimetableScreen(
         timetable = state.timetable,
         week = state.schedule.currentWeek,
         enabled = isCurrentWeek && state.session.loggedIn
+    )
+    val todayStatus = rememberTodayCourseStatus(
+        courses = state.schedule.data?.courses.orEmpty(),
+        timetable = state.timetable,
+        enabled = isCurrentWeek && state.schedule.queryMode == QueryMode.PERSONAL
     )
     // 停留在"现在空教室"时，跨到下一节自动更新筛选（只影响客户端过滤，不重新请求）
     LaunchedEffect(nowTarget, nowEmptyMode) {
@@ -517,6 +523,15 @@ fun TimetableScreen(
                 onToggleListMode = { roomListMode = !roomListMode }
             )
 
+            todayStatus?.takeIf { it.todayCount > 0 }?.let { status ->
+                TodayCourseCard(
+                    status = status,
+                    onClick = {
+                        (status.current ?: status.next)?.let { selectedCourse = it }
+                    }
+                )
+            }
+
             nowTarget?.let { target ->
                 NowEmptyRoomsBar(
                     label = target.label,
@@ -743,6 +758,129 @@ fun TimetableScreen(
                 onSelectWeek(it)
             }
         )
+    }
+}
+
+/**
+ * 今日课程状态每分钟刷新一次；只在个人课表的真实本周显示。
+ */
+@Composable
+private fun rememberTodayCourseStatus(
+    courses: List<Course>,
+    timetable: ClassTimetable?,
+    enabled: Boolean
+): TodayCourseStatus? {
+    if (!enabled) return null
+    val now by produceState(initialValue = LocalDateTime.now()) {
+        while (true) {
+            value = LocalDateTime.now()
+            delay(60_000)
+        }
+    }
+    return remember(courses, timetable, now) {
+        computeTodayCourseStatus(courses, timetable, now)
+    }
+}
+
+@Composable
+private fun TodayCourseCard(
+    status: TodayCourseStatus,
+    onClick: () -> Unit
+) {
+    val course = status.current ?: status.next
+    val range = status.currentRange ?: status.nextRange
+    val isNow = status.current != null
+    val countdown = when {
+        status.currentRange != null -> status.currentRange.last - status.nowMinutes
+        status.nextRange != null -> status.nextRange.first - status.nowMinutes
+        else -> null
+    }
+    val contentColor = MaterialTheme.colorScheme.onSurface
+    val accent = MaterialTheme.colorScheme.primary
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+            .then(
+                if (course != null && range != null) {
+                    Modifier.clickable(onClickLabel = "查看课程详情", onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Default.Schedule,
+            contentDescription = null,
+            tint = if (course != null) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = when {
+                    isNow -> "正在上课"
+                    course != null -> "下一节"
+                    else -> "今天的课已结束"
+                },
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = if (course != null) accent else contentColor
+            )
+            if (course != null && range != null) {
+                Text(
+                    text = "${formatMinutes(range.first)}-${formatMinutes(range.last)} · " +
+                        course.courseName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val meta = listOf(course.classroom, course.teacher)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Text(
+                        text = meta,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            } else {
+                Text(
+                    text = "今天共有 ${status.todayCount} 节课程",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (course != null && countdown != null) {
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = if (isNow) "还剩" else "还有",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "$countdown 分钟",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = accent
+                )
+                Text(
+                    text = "剩余 ${status.remaining.size} 节",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
