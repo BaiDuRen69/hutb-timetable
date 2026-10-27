@@ -12,6 +12,8 @@ import com.hutb.timetable.core.Semester
 import com.hutb.timetable.core.WeekSchedule
 import com.hutb.timetable.data.local.ClassTimetable
 import com.hutb.timetable.ui.theme.HutbTimetableTheme
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -136,5 +138,55 @@ class TimetableScreenTest {
         compose.onNodeWithText(
             "• 周一 高等数学：教室：至诚楼A201 → 至诚楼B202"
         ).assertIsDisplayed()
+    }
+
+    @Test
+    fun todayShortcutSwitchesToPersonalMode() {
+        var switchedTo: QueryMode? = null
+        var handled = false
+        val state = TimetableUiState(
+            schedule = ScheduleState(
+                data = WeekSchedule(
+                    semesterId = "2026-2027-1",
+                    semesterName = "2026-2027-1",
+                    week = 8,
+                    courses = emptyList()
+                ),
+                semesters = listOf(Semester("2026-2027-1", "2026-2027-1")),
+                currentSemesterId = "2026-2027-1",
+                currentWeek = 8,
+                queryMode = QueryMode.ROOM
+            ),
+            session = SessionState(loggedIn = false, expired = true),
+            timetable = ClassTimetable.defaultTimetables().first(),
+            semesterStartDate = "2026-09-07"
+        )
+
+        compose.setContent {
+            HutbTimetableTheme {
+                TimetableScreen(
+                    state = state,
+                    onRefresh = {},
+                    onPrevWeek = {},
+                    onNextWeek = {},
+                    onSelectWeek = {},
+                    onSelectSemester = {},
+                    onLogin = {},
+                    onLogout = {},
+                    onSwitchQueryMode = { switchedTo = it },
+                    onPickRoom = {},
+                    onShowSnapshots = {},
+                    onFilterChange = {},
+                    shortcutAction = "today_timetable",
+                    onShortcutHandled = { handled = true }
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(QueryMode.PERSONAL, switchedTo)
+            assertTrue(handled)
+        }
     }
 }

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:shortcutId="now_empty_rooms"
+        android:shortcutLongLabel="@string/shortcut_now_empty_long"
+        android:shortcutShortLabel="@string/shortcut_now_empty_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.hutb.timetable.ui.MainActivity"
+            android:targetPackage="com.hutb.timetable">
+            <extra
+                android:name="shortcut_action"
+                android:value="now_empty_rooms" />
+        </intent>
+    </shortcut>
+
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:shortcutId="today_timetable"
+        android:shortcutLongLabel="@string/shortcut_today_long"
+        android:shortcutShortLabel="@string/shortcut_today_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="com.hutb.timetable.ui.MainActivity"
+            android:targetPackage="com.hutb.timetable">
+            <extra
+                android:name="shortcut_action"
+                android:value="today_timetable" />
+        </intent>
+    </shortcut>
+</shortcuts>

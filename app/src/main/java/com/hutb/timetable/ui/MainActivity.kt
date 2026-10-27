@@ -1,5 +1,6 @@
 package com.hutb.timetable.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.widget.Toast
@@ -45,6 +46,7 @@ import com.hutb.timetable.widget.TodayWidgetProvider
 import com.hutb.timetable.ui.theme.ThemeMode
 import com.hutb.timetable.ui.theme.ThemeStyle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * 主界面宿主。
@@ -56,7 +58,20 @@ import kotlinx.coroutines.delay
  */
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_SHORTCUT_ACTION = "shortcut_action"
+    }
+
     private var viewModel: TimetableViewModel? = null
+
+    /** 图标快捷方式的一次性动作；消费后置空，避免旋转/重组重复执行。 */
+    private val shortcutAction = MutableStateFlow<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        shortcutAction.value = intent.getStringExtra(EXTRA_SHORTCUT_ACTION)
+    }
 
     private val loginLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -87,6 +102,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val container = (application as HutbApp).container
+        // 旋转重建时不重放旧动作；只有从快捷方式冷启动才读取
+        if (savedInstanceState == null) {
+            shortcutAction.value = intent?.getStringExtra(EXTRA_SHORTCUT_ACTION)
+        }
 
         setContent {
             var themeMode by remember {
@@ -102,6 +121,7 @@ class MainActivity : ComponentActivity() {
                 viewModel = vm
 
                 val state by vm.uiState.collectAsStateWithLifecycle()
+                val pendingShortcut by shortcutAction.collectAsStateWithLifecycle()
 
                 // 课表/周次/作息变化后同步桌面小组件；没有小组件时该调用直接返回
                 LaunchedEffect(
@@ -236,6 +256,12 @@ class MainActivity : ComponentActivity() {
                         onDismissChanges = { vm.dismissChanges() },
                         onToggleShowWeekend = { vm.toggleShowWeekend() },
                         onToggleHideEmptyPeriods = { vm.toggleHideEmptyPeriods() },
+                        shortcutAction = pendingShortcut,
+                        onShortcutHandled = {
+                            shortcutAction.value = null
+                            this@MainActivity.intent
+                                ?.removeExtra(EXTRA_SHORTCUT_ACTION)
+                        },
                         onOpenSettings = { showSettings = true },
                         onShowSnapshots = {
                             snapshots = PageSnapshot.list(this@MainActivity)

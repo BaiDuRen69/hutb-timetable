@@ -109,7 +109,10 @@ fun TimetableScreen(
     onShowNowEmptyRooms: (ScheduleFilter) -> Unit = {},
     onDismissChanges: () -> Unit = {},
     onToggleShowWeekend: () -> Unit = {},
-    onToggleHideEmptyPeriods: () -> Unit = {}
+    onToggleHideEmptyPeriods: () -> Unit = {},
+    /** 图标快捷方式一次性动作：now_empty_rooms / today_timetable */
+    shortcutAction: String? = null,
+    onShortcutHandled: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedCourse by remember { mutableStateOf<Course?>(null) }
@@ -256,6 +259,47 @@ fun TimetableScreen(
         nowEmptyMode = false
         emptyRoomsOnly = false
         onFilterChange(ScheduleFilter())
+    }
+    val applyNowTarget: (NowEmptyTarget) -> Unit = { target ->
+        nowEmptyMode = true
+        emptyRoomsOnly = true
+        val inRoomMode = state.schedule.queryMode == QueryMode.ROOM
+        val buildingKnown = state.room.selectedBuildingId != null
+        when {
+            // 还没选教学楼：切到教室模式并保留筛选，选楼后直接显示空教室
+            !buildingKnown -> {
+                onFilterChange(target.filter)
+                if (!inRoomMode) onSwitchQueryMode(QueryMode.ROOM)
+            }
+            // 已在该楼的整楼矩阵里，只需套用节次筛选
+            inRoomMode && state.room.selectedRoomCode == null -> {
+                onFilterChange(target.filter)
+            }
+            // 个人模式或正看着某间教室：一次性切模式/清教室并重查
+            else -> onShowNowEmptyRooms(target.filter)
+        }
+    }
+    LaunchedEffect(shortcutAction, nowTarget, state.session.loggedIn) {
+        when (shortcutAction) {
+            "now_empty_rooms" -> {
+                if (nowTarget != null) {
+                    applyNowTarget(nowTarget)
+                } else if (!state.session.loggedIn) {
+                    onLogin()
+                }
+                onShortcutHandled()
+            }
+
+            "today_timetable" -> {
+                if (state.schedule.queryMode != QueryMode.PERSONAL) {
+                    onSwitchQueryMode(QueryMode.PERSONAL)
+                }
+                onShortcutHandled()
+            }
+
+            null -> Unit
+            else -> onShortcutHandled()
+        }
     }
 
     // 教室条件：校区 · 教学楼 · 教室（README 承诺的三级信息）
@@ -560,25 +604,7 @@ fun TimetableScreen(
                     subtitle = target.subtitle,
                     active = nowEmptyMode,
                     onClear = clearNowFilter,
-                    onClick = {
-                        nowEmptyMode = true
-                        emptyRoomsOnly = true
-                        val inRoomMode = state.schedule.queryMode == QueryMode.ROOM
-                        val buildingKnown = state.room.selectedBuildingId != null
-                        when {
-                            // 还没选教学楼：切到教室模式并保留筛选，选楼后直接显示空教室
-                            !buildingKnown -> {
-                                onFilterChange(target.filter)
-                                if (!inRoomMode) onSwitchQueryMode(QueryMode.ROOM)
-                            }
-                            // 已在该楼的整楼矩阵里，只需套用节次筛选
-                            inRoomMode && state.room.selectedRoomCode == null -> {
-                                onFilterChange(target.filter)
-                            }
-                            // 个人模式或正看着某间教室：一次性切模式/清教室并重查
-                            else -> onShowNowEmptyRooms(target.filter)
-                        }
-                    }
+                    onClick = { applyNowTarget(target) }
                 )
             }
 

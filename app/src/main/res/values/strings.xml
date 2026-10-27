@@ -26,4 +26,10 @@
     <!-- 桌面小组件 -->
     <string name="widget_today_label">今日课表</string>
     <string name="widget_today_description">显示今天剩余的课程，只读本地缓存，不发起网络请求</string>
+
+    <!-- 长按图标快捷方式 -->
+    <string name="shortcut_now_empty_short">现在空教室</string>
+    <string name="shortcut_now_empty_long">查看当前节次的空教室</string>
+    <string name="shortcut_today_short">今日课表</string>
+    <string name="shortcut_today_long">查看今天的课程</string>
 </resources>
