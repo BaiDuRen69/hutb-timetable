@@ -1,5 +1,6 @@
 package com.hutb.timetable.ui.timetable
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,13 +9,17 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -23,6 +28,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,20 +36,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hutb.timetable.core.RoomOption
 import com.hutb.timetable.core.isOpaqueRoomName
+import kotlinx.coroutines.launch
 
 /**
  * 教室选择面板（草稿态）。
@@ -52,10 +63,10 @@ import com.hutb.timetable.core.isOpaqueRoomName
  * 对话框内的选择只写本地草稿，浏览选项通过 [onPreviewCampus]/[onPreviewBuilding]
  * 加载对应的教学楼/教室列表；点"确定"才一次性提交，点"取消"零状态变更、零请求。
  *
- * 用 ModalBottomSheet 而不是 AlertDialog：360dp 宽的弹窗里塞三级级联会把
- * 教室列表压到 190dp，BottomSheet 可以占满宽度并把列表拉到 240dp。
+ * “确定/取消”固定在底部操作栏：选完校区/教学楼即可直接确认“全部教室”，
+ * 不必再滚过教室列表去找按钮；操作栏同时显示当前选择摘要。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RoomPickerDialog(
     campuses: List<RoomOption>,
@@ -77,6 +88,11 @@ fun RoomPickerDialog(
     var buildingId by remember { mutableStateOf(initialBuildingId) }
     var roomCode by remember { mutableStateOf(initialRoomCode) }
     var keyword by remember { mutableStateOf("") }
+    val buildingSection = remember { BringIntoViewRequester() }
+    val roomSection = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    // 底部“确定”是必要操作，面板默认全展开，避免用户还要先上拉才能看到按钮
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val filteredRooms = remember(classrooms, keyword) {
         if (keyword.isBlank()) {
@@ -88,135 +104,216 @@ fun RoomPickerDialog(
             }
         }
     }
+    val selectedCampusName = campuses.firstOrNull { it.code == campusId }?.name
     val selectedBuildingName = buildings.firstOrNull { it.code == buildingId }?.name
+    val selectedRoomName = classrooms.firstOrNull { it.code == roomCode }?.name
+    // 教学楼还在加载时先别让用户确认，否则提交的楼名可能为空
+    val canConfirm = campusId != null && buildingId != null && !buildingsLoading
+    val selectionSummary = when {
+        campusId == null -> "请选择校区和教学楼"
+        buildingId == null -> "${selectedCampusName ?: "已选校区"} · 请选择教学楼"
+        else -> {
+            val roomLabel = when {
+                roomCode == null -> "全部教室"
+                selectedRoomName != null -> selectedRoomName
+                else -> "指定教室"
+            }
+            listOf(
+                selectedCampusName ?: "已选校区",
+                selectedBuildingName ?: "已选教学楼",
+                roomLabel
+            ).joinToString(" · ")
+        }
+    }
+    // 选完教学楼后，大多数场景是"看整栋楼"，不需要再滚到教室列表底部找确定
+    val confirmLabel = when {
+        roomCode != null -> "查看这间教室"
+        buildingId != null -> "查看全部教室"
+        else -> "确定"
+    }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
+                .fillMaxHeight(0.92f)
         ) {
-            Text(
-                text = "选择校区 / 教学楼 / 教室",
-                style = MaterialTheme.typography.titleMedium
-            )
-            if (!errorMessage.isNullOrBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = errorMessage,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = onRetry) {
-                        Text("重试", style = MaterialTheme.typography.bodySmall)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+            ) {
+                Text(
+                    text = "选择校区 / 教学楼 / 教室",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (!errorMessage.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onRetry) {
+                            Text("重试", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 }
-            }
-            Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
 
-            SectionLabel("校区")
-            OptionChips(
-                options = campuses,
-                selectedCode = campusId,
-                onSelect = { option ->
-                    campusId = option.code
-                    buildingId = null
-                    roomCode = null
-                    onPreviewCampus(option.code)
-                }
-            )
-
-            Spacer(Modifier.height(10.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(10.dp))
-
-            SectionLabel("教学楼")
-            when {
-                buildingsLoading -> LoadingBox(40.dp)
-                buildings.isEmpty() -> HintText("未获取到教学楼，请检查网络后重试")
-                else -> OptionChips(
-                    options = buildings,
-                    selectedCode = buildingId,
+                SectionLabel("校区")
+                OptionChips(
+                    options = campuses,
+                    selectedCode = campusId,
                     onSelect = { option ->
-                        buildingId = option.code
+                        campusId = option.code
+                        buildingId = null
                         roomCode = null
-                        onPreviewBuilding(campusId.orEmpty(), option.code, option.name)
+                        onPreviewCampus(option.code)
+                        scope.launch { buildingSection.bringIntoView() }
                     }
                 )
-            }
 
-            Spacer(Modifier.height(10.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(10.dp))
 
-            SectionLabel("教室")
-            OutlinedTextField(
-                value = keyword,
-                onValueChange = { keyword = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                placeholder = {
-                    Text("输入教室名或场地代码", style = MaterialTheme.typography.bodyMedium)
-                },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Column(modifier = Modifier.bringIntoViewRequester(buildingSection)) {
+                    SectionLabel("教学楼")
+                    when {
+                        buildingsLoading -> LoadingBox(40.dp)
+                        buildings.isEmpty() -> HintText("未获取到教学楼，请检查网络后重试")
+                        else -> OptionChips(
+                            options = buildings,
+                            selectedCode = buildingId,
+                            onSelect = { option ->
+                                buildingId = option.code
+                                roomCode = null
+                                onPreviewBuilding(campusId.orEmpty(), option.code, option.name)
+                                scope.launch { roomSection.bringIntoView() }
+                            }
+                        )
+                    }
                 }
-            )
-            Spacer(Modifier.height(6.dp))
 
-            when {
-                classroomsLoading -> LoadingBox(120.dp)
-                buildingId == null -> HintText("请先选择教学楼")
-                classrooms.isEmpty() -> HintText("该教学楼下暂无可选教室")
-                else -> {
-                    LazyColumn(modifier = Modifier.height(240.dp)) {
-                        item {
-                            RoomRow(
-                                text = "全部教室（不指定）",
-                                selected = roomCode == null,
-                                onClick = { roomCode = null }
+                Spacer(Modifier.height(10.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(10.dp))
+
+                Column(modifier = Modifier.bringIntoViewRequester(roomSection)) {
+                    SectionLabel("教室")
+                    if (canConfirm) {
+                        FilledTonalButton(
+                            onClick = {
+                                onConfirm(campusId, buildingId, selectedBuildingName, null)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "查看「${selectedBuildingName ?: "该楼"}」全部教室",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        items(filteredRooms, key = { it.code }) { option ->
-                            RoomRow(
-                                text = displayRoom(option),
-                                selected = roomCode == option.code,
-                                onClick = { roomCode = option.code }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    OutlinedTextField(
+                        value = keyword,
+                        onValueChange = { keyword = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        placeholder = {
+                            Text("输入教室名或场地代码", style = MaterialTheme.typography.bodyMedium)
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                        if (filteredRooms.isEmpty()) {
-                            item {
-                                Text(
-                                    text = "没有匹配的教室",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(12.dp)
-                                )
+                    )
+                    Spacer(Modifier.height(6.dp))
+
+                    when {
+                        classroomsLoading -> LoadingBox(120.dp)
+                        buildingId == null -> HintText("请先选择教学楼")
+                        classrooms.isEmpty() -> HintText("该教学楼下暂无可选教室")
+                        else -> {
+                            LazyColumn(modifier = Modifier.height(240.dp)) {
+                                item {
+                                    RoomRow(
+                                        text = "全部教室（不指定）",
+                                        selected = roomCode == null,
+                                        onClick = { roomCode = null }
+                                    )
+                                }
+                                items(filteredRooms, key = { it.code }) { option ->
+                                    RoomRow(
+                                        text = displayRoom(option),
+                                        selected = roomCode == option.code,
+                                        onClick = { roomCode = option.code }
+                                    )
+                                }
+                                if (filteredRooms.isEmpty()) {
+                                    item {
+                                        Text(
+                                            text = "没有匹配的教室",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(12.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                Spacer(Modifier.height(16.dp))
             }
 
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f)
-                ) { Text("取消") }
-                Button(
-                    onClick = { onConfirm(campusId, buildingId, selectedBuildingName, roomCode) },
-                    enabled = campusId != null && buildingId != null,
-                    modifier = Modifier.weight(1f)
-                ) { Text("确定") }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                tonalElevation = 3.dp,
+                shadowElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = selectionSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("取消") }
+                        Button(
+                            onClick = {
+                                onConfirm(campusId, buildingId, selectedBuildingName, roomCode)
+                            },
+                            enabled = canConfirm,
+                            modifier = Modifier.weight(1f)
+                        ) { Text(confirmLabel) }
+                    }
+                }
             }
         }
     }

@@ -15,7 +15,7 @@
 | 本地缓存 + 离线查看 | ✅ | `ScheduleCache.kt` / `TimetableRepository` |
 | 网络异常 / 登录失效提示 | ✅ | `HutbError` / `EduHttpClient.isLoginRequired` |
 | **按教学楼/教室查询** | ✅ | `RoomPickerDialog.kt` + `parseRoomSchedule()` + `RoomMatrix.kt` |
-| 校区/教学楼/教室三级级联 | ✅ | `TimetableViewModel.loadCampuses/loadBuildings/loadClassrooms` |
+| 校区/教学楼/教室三级级联 | ✅ | `TimetableViewModel.loadCampuses/loadBuildings/loadClassrooms`；选择面板默认全展开，选完校区自动滚到教学楼、选完教学楼自动滚到教室区；教室区顶部提供“查看「教学楼」全部教室”一键确认，无需再找底部按钮 |
 | 按某一天查询 | ✅ | 个人课表“日视图”整屏显示当天课程，带日期芯片、横向滑动与当前时刻线，见 `DayScheduleView.kt` |
 | **星期 / 节次区间筛选** | ✅ | `ScheduleFilter.kt` + `FilterSheet.kt`（客户端过滤，见 `docs/protocol-facts.md` 1.6.3） |
 | **精简教室名显示** | ✅ | `shortRoomName()`（core）+ `RoomMatrix` 左列 / 空教室列表（`乐知楼E101*(智慧)` → `E101`，星号与括号注记都剥掉；左列宽度按最长教室名自适应） |
@@ -89,7 +89,7 @@ release 包使用独立签名，和 debug 包不能覆盖安装；从 debug 换�
 ```bash
 # 需要已连接设备或模拟器；MIUI 真机可能拦截测试 Activity，建议优先用模拟器
 ./gradlew :app:connectedDebugAndroidTest --console=plain
-# → 23 个 Compose/仪器测试：教室列表、空教室清除筛选、今日课程状态、课表变化展开、日视图切换、紧凑周视图、快捷方式路由、课程搜索、每日摘要文案、通知与数据同步设置入口、连堂分割、免责声明、会话过期缓存、分享/ICS
+# → 25 个 Compose/仪器测试：教室列表、空教室清除筛选、教室选择面板、今日课程状态、课表变化展开、日视图切换、紧凑周视图、快捷方式路由、课程搜索、每日摘要文案、通知与数据同步设置入口、连堂分割、免责声明、会话过期缓存、分享/ICS
 ```
 
 ## 隐私与合规
